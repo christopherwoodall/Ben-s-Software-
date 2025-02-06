@@ -7,6 +7,7 @@ import sys
 import os
 import ctypes
 import win32gui
+from keyboard_predictive import get_predictive_suggestions, update_word_usage
 
 class KeyboardFrameApp(tk.Tk):
     def __init__(self):
@@ -99,18 +100,20 @@ class KeyboardFrame(tk.Frame):
         self.scanning_thread = None
         self.press_time = None  # To record the time when spacebar is pressed
         self.debounce_time = 0.1
+        self.toggle_cursor()
+        self.tts_trigger_count = 0
 
         self.tts_engine = pyttsx3.init()  # Initialize TTS engine
-
+        
         # Initialize current mode
         self.current_mode = "Keyboard"  # Default mode is "Keyboard"
 
         # Initialize rows and row_titles
         self.row_titles = [
-            "Controls", "A-B-C-D-E-F", "G-H-I-J-K-L", "M-N-O-P-Q-R", "S-T-U-V-W-X", "Y-Z 1 2 3", "4 5 6 7 8 9"
+            "Controls", "A-B-C-D-E-F", "G-H-I-J-K-L", "M-N-O-P-Q-R", "S-T-U-V-W-X", "Y-Z 1 2 3", "4 5 6 7 8 9", "Predictive Text"
         ]
         self.rows = [
-            ["Space", "Del Letter", "Del Word", "Clear", "Layout", "Main"],
+            ["Space", "Del Letter", "Del Word", "Clear", "Layout", "Main"],  # Controls
             ["A", "B", "C", "D", "E", "F"],
             ["G", "H", "I", "J", "K", "L"],
             ["M", "N", "O", "P", "Q", "R"],
@@ -119,10 +122,37 @@ class KeyboardFrame(tk.Frame):
             ["4", "5", "6", "7", "8", "9"]
         ]
 
+        # Define predictive text row
+        self.predictive_text_row = ["", "", "", "", "", ""]  # Placeholder for predictive text
+        self.rows.append(self.predictive_text_row)  # Append to the rows list
+
         # Create the layout
         self.create_layout()
         self.bind_keys()
         self.highlight_row(0)  # Start with the first row highlighted
+        self.update_predictive_text()  # ✅ Load predictions when the keyboard starts
+
+    def update_predictive_text(self):
+        """Dynamically updates the predictive text row in real-time."""
+        text = self.current_text.get().strip()
+        print(f"DEBUG: Current text input = '{text}'")  # Debugging line
+
+        suggestions = get_predictive_suggestions(text)
+        print(f"DEBUG: Predicted suggestions = {suggestions}")  # Debugging line
+
+        # Ensure exactly 6 slots are filled in the predictive text row
+        self.predictive_text_row[:] = suggestions + [""] * (6 - len(suggestions))
+        
+        # Update the last row dynamically
+        if len(self.rows) > 0:
+            self.rows[-1] = self.predictive_text_row
+
+        self.create_layout()
+
+    def toggle_cursor(self):
+        """Ensures the cursor remains static in the text field."""
+        text = self.current_text.get().rstrip("|")  # Remove any existing cursor
+        self.current_text.set(text + "|")  # Always keep the cursor at the end
 
     def create_layout(self):
         """Create the layout for the current mode."""
@@ -183,20 +213,23 @@ class KeyboardFrame(tk.Frame):
         )
 
     def toggle_mode(self):
-        """Toggle between Keyboard Mode and Words Mode."""
+        """Toggle between Keyboard Mode and Words Mode, preserving the predictive row."""
         if self.current_mode == "Keyboard":
             self.current_mode = "Words"
             self.show_main_menu()  # Display the main Words Mode menu
             self.current_row_index = 0  # Reset to Controls row
             self.in_row_selection_mode = True
+            self.toggle_cursor()
             self.highlight_row(0)
         else:
             self.current_mode = "Keyboard"
-            # Reset to Keyboard Mode layout
+            # Reset to Keyboard Mode layout but preserve the predictive row
             self.row_titles = [
-                "Controls", "A-B-C-D-E-F", "G-H-I-J-K-L", "M-N-O-P-Q-R", "S-T-U-V-W-X", "Y-Z-0-1-2-3", "4-5-6-7-8-9"
+                "Controls", "A-B-C-D-E-F", "G-H-I-J-K-L", "M-N-O-P-Q-R",
+                "S-T-U-V-W-X", "Y-Z 0 1 2 3", "4 5 6 7 8 9", "Predictive Text"
             ]
-            self.rows = [
+            # Define the base rows for Keyboard Mode
+            base_rows = [
                 ["Space", "Del Letter", "Del Word", "Clear", "Layout", "Main"],  # Controls
                 ["A", "B", "C", "D", "E", "F"],
                 ["G", "H", "I", "J", "K", "L"],
@@ -205,11 +238,14 @@ class KeyboardFrame(tk.Frame):
                 ["Y", "Z", "0", "1", "2", "3"],
                 ["4", "5", "6", "7", "8", "9"]
             ]
+            # Keep predictive row updated
+            self.rows = base_rows + [self.predictive_text_row]  
             self.create_layout()
+            self.update_predictive_text()  # Ensure predictive row is updated
             self.current_row_index = 0  # Highlight Controls row
             self.in_row_selection_mode = True
             self.highlight_row(0)
-
+        
     def create_window_controls(self):
         """Adds Close and Minimize buttons to the top of the app window."""
         control_frame = tk.Frame(self, bg="gray")  # Change background color to make it visible
@@ -454,37 +490,59 @@ class KeyboardFrame(tk.Frame):
         label = self.rows[self.current_row_index - 1][button_index]
         self.tts_engine.say(label)
         self.tts_engine.runAndWait()
-
+        
     def handle_button_press(self, char):
-        """Handle button actions based on the mode."""
+        # Get the current text without the cursor.
+        text = self.current_text.get().rstrip("|")        
+        if char in self.predictive_text_row:
+            if text.endswith(" "):
+                new_text = text + char
+            else:
+
+                parts = text.rsplit(" ", 1)
+                if len(parts) == 1:
+                    new_text = char
+                else:
+                    new_text = parts[0] + " " + char
+            self.current_text.set(new_text + " |")
+            self.update_predictive_text()
+            return  # Exit early since we have handled the predictive suggestion.
+        
+        # --- Special Buttons ---
         if char == "Layout":
             self.toggle_mode()
         elif char == "Main":
-            self.open_and_exit("comm-v8.py")  # Close and open the main script
+            self.open_and_exit("comm-v8.py")  # Close current script and open the main script.
         elif char == "Back":
-            self.show_main_menu()  # Return to the main Words Mode menu
+            self.show_main_menu()  # Return to the main Words Mode menu.
         elif char in ["Space", "Del Word", "Clear"]:
-            # Shared actions between Keyboard and Words modes
             if char == "Space":
-                self.current_text.set(self.current_text.get() + " ")
+                self.current_text.set(text + " |")
             elif char == "Clear":
-                self.current_text.set("")
+                self.current_text.set("|")  # Reset text with just the cursor.
             elif char == "Del Word":
-                words = self.current_text.get().split()
-                self.current_text.set(" ".join(words[:-1]))
+                words = text.split()
+                self.current_text.set(" ".join(words[:-1]) + " |")
+        
+        # --- Keyboard Mode (Normal Letter Buttons) ---
         elif self.current_mode == "Keyboard":
-            # Handle alphabet keyboard-specific actions
             if char == "Del Letter":
-                self.current_text.set(self.current_text.get()[:-1])
+                self.current_text.set(text[:-1] + "|")
             else:
-                self.current_text.set(self.current_text.get() + char)
+                self.current_text.set(text + char + "|")
+                self.update_predictive_text()
+        
+        # --- Words Mode (For submenus, etc.) ---
         elif self.current_mode == "Words":
-            # Handle words mode-specific actions
             submenus = self.get_submenus()
-            if char in submenus:  # Navigate to a submenu
-                self.show_submenu(char)  # Navigate to the selected submenu
-            elif char in [word for row in self.rows for word in row]:  # If a word is clicked in a submenu
-                self.current_text.set(self.current_text.get() + char + " ")  # Append the word to the text box`
+            if char in submenus:
+                self.show_submenu(char)
+            elif char in [word for row in self.rows for word in row]:
+                self.current_text.set(text + char + "|")
+        
+        # Always update predictive suggestions after handling the button press.
+        self.update_predictive_text()
+
 
     def show_submenu(self, submenu_title):
         """Display the submenu for the selected title."""
@@ -510,6 +568,7 @@ class KeyboardFrame(tk.Frame):
                 words[18:24],  # Row 4
                 words[24:30],  # Row 5
                 words[30:36],  # Row 6
+                ["", "", "", "", "", ""]
             ]
             self.create_layout()
 
@@ -523,51 +582,21 @@ class KeyboardFrame(tk.Frame):
             print(f"Failed to open script {script_name}: {e}")
 
     def read_text_tts(self):
-        """Read the current text with TTS."""
-        text = self.current_text.get()
+        """Reads the current text with TTS and tracks word usage after 3 triggers."""
+        text = self.current_text.get().strip()
         if text:
             self.tts_engine.say(text)
             self.tts_engine.runAndWait()
+            self.tts_trigger_count += 1  # Increment counter
+
+            if self.tts_trigger_count >= 3:
+                update_word_usage(text)  # Update Ben's word frequency
+                self.tts_trigger_count = 0  # Reset counter
 
     def show_main_menu(self):
         """Display the main Words Mode menu with a 6x6 grid of submenu titles."""
         submenus = self.get_submenus()
 
-        # Row titles for TTS
-        self.row_titles = [
-            "General References", "Daily Life", "Education and Nature",
-            "Emotions and Actions", "Practical and Everyday Living", "Shows and TV"
-        ]
-
-        # Submenu titles for rows
-        submenu_titles = [
-            "Common Phrases/Needs", "Pronouns", "Request Basics", "Time/Days Reference",
-            "Location Reference", "Family & Proper Names", "Forming Questions", "Health & Body",
-            "Clothing & Accessories", "Weather & Seasons", "Food & Drink", "Entertainment",
-            "Numbers & Math", "Transportation", "Work & Tools", "School & Learning",
-            "Animals", "Nature", "Emotions & Feelings", "Travel & Vacations",
-            "Holidays & Celebrations", "Shopping & Money", "Technology & Media", "Verbs & Actions",
-            "Household", "Sports & Activities", "Hobbies & Interests", "Jobs & Professions",
-            "Colors", "People & Titles", "Simpsons/Futurama", "Family Guy/American Dad",
-            "South Park", "Dragon Ball Universe", "Drake & Josh/iCarly/Victorious", "Rugrats/Spongebob"
-        ]
-
-        # Create rows with controls and submenu buttons
-        self.rows = [
-            ["Space", "Del Word", "Clear", "Back", "Layout", "Main"],  # Controls row
-            submenu_titles[:6],  # General References
-            submenu_titles[6:12],  # Daily Life
-            submenu_titles[12:18],  # Education and Nature
-            submenu_titles[18:24],  # Emotions and Actions
-            submenu_titles[24:30],  # Practical and Everyday Living
-            submenu_titles[30:36]   # Shows and TV
-        ]
-        self.create_layout()
-
-    def show_main_menu(self):
-        """Display the main Words Mode menu with a 6x6 grid of submenu titles."""
-        submenus = self.get_submenus()
-        
         # Categorized row titles for TTS feedback
         self.row_titles = [
             "General References",   # Row 1
@@ -575,30 +604,31 @@ class KeyboardFrame(tk.Frame):
             "Education and Nature", # Row 3
             "Emotions and Actions", # Row 4
             "Practical and Everyday Living", # Row 5
-            "Shows and TV"          # Row 6
+            "Shows and TV",          # Row 6
+            "Predictive Text"    #Row 7 Predictive Text
         ]
 
         # Collect submenu titles for the 6x6 grid
         submenu_titles = [
             # General References (6 titles)
-            "Common Phrases/Needs", "Pronouns", "Request Basics", "Time/Days Reference",
-            "Location Reference", "Family & Proper Names",
+            "Common Phrases/Needs", "Pronouns", "Adjectives", "Time/Days Reference",
+            "Location Reference", "Family & Proper Names", 
 
             # Daily Life (6 titles)
             "Forming Questions", "Health & Body", "Clothing & Accessories", "Weather & Seasons",
-            "Food & Drink", "Entertainment",
+            "Adjectives", "Entertainment", 
 
             # Education and Nature (6 titles)
             "Numbers & Math", "Transportation", "Work & Tools", "School & Learning",
-            "Animals", "Nature",
+            "Animals", "Nature", 
 
             # Emotions and Actions (6 titles)
             "Emotions & Feelings", "Travel & Vacations", "Holidays & Celebrations",
-            "Shopping & Money", "Technology & Media", "Verbs & Actions",
+            "Shopping & Money", "Technology & Media", "Verbs & Actions", "Predictive Text"
 
             # Practical and Everyday Living (6 titles)
             "Household", "Sports & Activities", "Hobbies & Interests", "Jobs & Professions",
-            "Colors", "People & Titles",
+            "Colors", "People & Titles", 
 
             # Shows and TV (6 titles)
             "Simpsons/Futurama", "Family Guy/American Dad", "South Park",
@@ -618,6 +648,7 @@ class KeyboardFrame(tk.Frame):
             submenu_titles[18:24],  # Row 4
             submenu_titles[24:30],  # Row 5
             submenu_titles[30:36],  # Row 6
+            ["", "", "", "", "", ""]
         ]
         # Reset scanning to start at the Controls row
         self.current_row = 1  # Set highlight to start on Controls row
@@ -632,404 +663,407 @@ class KeyboardFrame(tk.Frame):
                 "Emotions and Actions",
                 "Practical and Technology",
                 "Shows and TV",
+                "Predictive Text"
             ],
             "Common Phrases/Needs": {  # Add the rest of your hierarchical data here
-                "row_titles": ["Basic Actions", "Movement", "Communication", "Work", "Play", "Feelings"],
+                "row_titles": ["Basic Actions", "Movement", "Communication", "Work", "Play", "Feelings", "Predictive Text"],
                 "rows": [
-                    ["Do", "Make", "Get", "Take", "Give", "Put"],
-                    ["Run", "Walk", "Jump", "Sit", "Stand", "Climb"],
-                    ["Talk", "Ask", "Tell", "Listen", "Speak", "Say"],
-                    ["Build", "Fix", "Clean", "Write", "Plan", "Work"],
-                    ["Play", "Laugh", "Dance", "Sing", "Draw", "Cook"],
-                    ["Love", "Hate", "Need", "Feel", "Want", "Smile"],
+                    ["DO", "MAKE", "GET", "TAKE", "GIVE", "PUT"],
+                    ["RUN", "WALK", "JUMP", "SIT", "STAND", "CLIMB"],
+                    ["TALK", "ASK", "TELL", "LISTEN", "SPEAK", "SAY"],
+                    ["BUILD", "FIX", "CLEAN", "WRITE", "PLAN", "WORK"],
+                    ["PLAY", "LAUGH", "DANCE", "SING", "DRAW", "COOK"],
+                    ["LOVE", "HATE", "NEED", "FEEL", "WANT", "SMILE"],
+
                 ],
             },
             "Pronouns": {
-                "row_titles": ["Subject", "Subject 2", "Possessive", "Reflexive", "Demonstrative", "Interrogative"],
+                "row_titles": ["Subject", "Subject 2", "Possessive", "Reflexive", "Demonstrative", "Interrogative", "Predictive Text"],
                 "rows": [
-                    ["I", "You", "He", "She", "It", "We"],  # Subject
-                    ["Me", "You", "Him", "Her", "It", "Us"],  # Object
-                    ["My", "Your", "His", "Her", "Its", "Our"],  # Possessive
-                    ["Myself", "Yourself", "Himself", "Herself", "Itself", "Ourselves"],  # Reflexive
-                    ["This", "That", "These", "Those", "Here", "There"],  # Demonstrative
-                    ["Who", "What", "Which", "Whose", "Whom", "Why"],  # Interrogative
+                    ["I", "YOU", "HE", "SHE", "IT", "WE"],
+                    ["ME", "YOU", "HIM", "HER", "IT", "US"],
+                    ["MY", "YOUR", "HIS", "HER", "ITS", "OUR"],
+                    ["MYSELF", "YOURSELF", "HIMSELF", "HERSELF", "ITSELF", "OURSELVES"],
+                    ["THIS", "THAT", "THESE", "THOSE", "HERE", "THERE"],
+                    ["WHO", "WHAT", "WHICH", "WHOSE", "WHOM", "WHY"],
                 ]
             },
-            "Request Basics": {
-                "row_titles": ["Food & Drink", "Help", "Comfort", "Information", "Toys/Games", "Other"],
+            "Adjectives": {
+                "row_titles": ["Size", "Help & Actions", "Comfort & Temperature", "Distance & Position", "Speed & Difficulty", "Appearance & Condition", "Predictive Text"],
                 "rows": [
-                    ["Water", "Juice", "Milk", "Tea", "Coffee", "Snack"],
-                    ["Help", "Fix", "Move", "Reach", "Carry", "Hold"],
-                    ["Cold", "Hot", "Blanket", "Pillow", "Fan", "Jacket"],
-                    ["Who", "What", "Where", "When", "Why", "How"],
-                    ["Ball", "Doll", "Car", "Puzzle", "Game", "Book"],
-                    ["Yes", "No", "Stop", "Go", "Wait", "Come"]
-                ],
+                    ["BIG", "SMALL", "TALL", "SHORT", "LONG", "TINY"],
+                    ["QUICK", "EASY", "DIFFICULT", "HEAVY", "LIGHT", "STRONG"],
+                    ["SOFT", "HARD", "FLUFFY", "WARM", "COLD", "COMFORTABLE"],
+                    ["FAR", "CLOSE", "HIGH", "LOW", "DEEP", "SHALLOW"],
+                    ["FAST", "SLOW", "NEW", "OLD", "YOUNG", "WEAK"],
+                    ["BEAUTIFUL", "UGLY", "CLEAN", "DIRTY", "QUIET", "LOUD"],
+
+                ]
             },
             "Time/Days Reference": {
-                "row_titles": ["Times of Day", "Days of Week", "Months", "Seasons", "Time Units", "Relative Time"],
+                "row_titles": ["Times of Day", "Days of Week", "Months", "Seasons", "Time Units", "Relative Time", "Predictive Text"],
                 "rows": [
-                    ["Morning", "Afternoon", "Evening", "Night", "Midnight", "Noon"],
-                    ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-                    ["January", "February", "March", "April", "May", "June"],
-                    ["Summer", "Winter", "Spring", "Autumn", "Rainy", "Dry"],
-                    ["Hour", "Minute", "Second", "Day", "Week", "Month"],
-                    ["Now", "Soon", "Later", "Tomorrow", "Yesterday", "Today"]
+                    ["MORNING", "AFTERNOON", "EVENING", "NIGHT", "MIDNIGHT", "NOON"],
+                    ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"],
+                    ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE"],
+                    ["SUMMER", "WINTER", "SPRING", "AUTUMN", "RAINY", "DRY"],
+                    ["HOUR", "MINUTE", "SECOND", "DAY", "WEEK", "MONTH"],
+                    ["NOW", "SOON", "LATER", "TOMORROW", "YESTERDAY", "TODAY"]
                 ],
             },
             "Location Reference": {
-                "row_titles": ["Home", "School", "Outdoors", "Public", "Travel", "Other"],
+                "row_titles": ["Home", "School", "Outdoors", "Public", "Travel", "Other", "Predictive Text"],
                 "rows": [
-                    ["Kitchen", "Bathroom", "Bedroom", "Living Room", "Garage", "Yard"],
-                    ["Classroom", "Office", "Library", "Gym", "House", "Cafeteria"],
-                    ["Park", "Beach", "Mountain", "Forest", "Trail", "Field"],
-                    ["Store", "Market", "Hospital", "Police", "Mall", "Airport"],
-                    ["Car", "Bus", "Train", "Plane", "Boat", "Bike"],
-                    ["City", "Village", "Island", "Hotel", "Camp", "Farm"]
+                    ["KITCHEN", "BATHROOM", "BEDROOM", "LIVING ROOM", "GARAGE", "YARD"],
+                    ["CLASSROOM", "OFFICE", "LIBRARY", "GYM", "HOUSE", "CAFETERIA"],
+                    ["PARK", "BEACH", "MOUNTAIN", "FOREST", "TRAIL", "FIELD"],
+                    ["STORE", "MARKET", "HOSPITAL", "POLICE", "MALL", "AIRPORT"],
+                    ["CAR", "BUS", "TRAIN", "PLANE", "BOAT", "BIKE"],
+                    ["CITY", "VILLAGE", "ISLAND", "HOTEL", "CAMP", "FARM"]
                 ],
             },
             "People & Titles": {
-                "row_titles": ["Family", "Friends", "Helpers", "Titles", "Generic Names", "Other"],
+                "row_titles": ["Family", "Friends", "Helpers", "Titles", "Generic Names", "Other", "Predictive Text"],
                 "rows": [
-                    ["Mom", "Dad", "Sister", "Brother", "Grandma", "Grandpa"],
-                    ["Friend", "Buddy", "Neighbor", "Classmate", "Bestie", "Pal"],
-                    ["Doctor", "Nurse", "Teacher", "Coach", "Therapist", "Helper"],
-                    ["Mr.", "Mrs.", "Miss", "Dr.", "Sir", "Ma’am"],
-                    ["Guy", "Girl", "Boy", "Kid", "Person", "Someone"],
-                    ["Boss", "Coworker", "Client", "Officer", "Driver", "Visitor"]
+                    ["MOM", "DAD", "SISTER", "BROTHER", "GRANDMA", "GRANDPA"],
+                    ["FRIEND", "BUDDY", "NEIGHBOR", "CLASSMATE", "BESTIE", "PAL"],
+                    ["DOCTOR", "NURSE", "TEACHER", "COACH", "THERAPIST", "HELPER"],
+                    ["MR.", "MRS.", "MISS", "DR.", "SIR", "MA’AM"],
+                    ["GUY", "GIRL", "BOY", "KID", "PERSON", "SOMEONE"],
+                    ["BOSS", "COWORKER", "CLIENT", "OFFICER", "DRIVER", "VISITOR"]
                 ],
             },
             "Forming Questions": {
-                "row_titles": ["Basic", "Clarification", "Personal", "Descriptive", "Decision-Making", "Other"],
+                "row_titles": ["Basic", "Clarification", "Personal", "Descriptive", "Decision-Making", "Other", "Predictive Text"],
                 "rows": [
-                    ["Who", "What", "Where", "When", "Why", "How"],
-                    ["Which", "Whose", "How Many", "How Much", "How Long", "Why Not"],
-                    ["Are You", "Can You", "Do You", "Will You", "Would You", "Could You"],
-                    ["Describe", "Explain", "Define", "Show Me", "Tell Me", "Repeat"],
-                    ["This?", "That?", "Here?", "There?", "Right?", "Wrong?"],
-                    ["Is It?", "Was It?", "Should It?", "Could It?", "Would It?", "Will It?"]
+                    ["WHO", "WHAT", "WHERE", "WHEN", "WHY", "HOW"],
+                    ["WHICH", "WHOSE", "HOW MANY", "HOW MUCH", "HOW LONG", "WHY NOT"],
+                    ["ARE YOU", "CAN YOU", "DO YOU", "WILL YOU", "WOULD YOU", "COULD YOU"],
+                    ["DESCRIBE", "EXPLAIN", "DEFINE", "SHOW ME", "TELL ME", "REPEAT"],
+                    ["THIS?", "THAT?", "HERE?", "THERE?", "RIGHT?", "WRONG?"],
+                    ["IS IT?", "WAS IT?", "SHOULD IT?", "COULD IT?", "WOULD IT?", "WILL IT?"]
                 ],
             },
             "Health & Body": {
-                "row_titles": ["Body Parts", "Senses", "Physical States", "Illnesses", "Treatments", "Medical Tools"],
+                "row_titles": ["Body Parts", "Senses", "Physical States", "Illnesses", "Treatments", "Medical Tools", "Predictive Text"],
                 "rows": [
-                    ["Head", "Face", "Neck", "Arm", "Leg", "Hand"],
-                    ["Eyes", "Ears", "Nose", "Mouth", "Skin", "Hair"],
-                    ["Tired", "Hungry", "Thirsty", "Cold", "Hot", "Sick"],
-                    ["Fever", "Cough", "Pain", "Injury", "Allergy", "Flu"],
-                    ["Medicine", "Therapy", "Bandage", "Rest", "Ice Pack", "Injection"],
-                    ["Stethoscope", "Thermometer", "Syringe", "Wheelchair", "Crutch", "IV"]
+                    ["HEAD", "FACE", "NECK", "ARM", "LEG", "HAND"],
+                    ["EYES", "EARS", "NOSE", "MOUTH", "SKIN", "HAIR"],
+                    ["TIRED", "HUNGRY", "THIRSTY", "COLD", "HOT", "SICK"],
+                    ["FEVER", "COUGH", "PAIN", "INJURY", "ALLERGY", "FLU"],
+                    ["MEDICINE", "THERAPY", "BANDAGE", "REST", "ICE PACK", "INJECTION"],
+                    ["STETHOSCOPE", "THERMOMETER", "SYRINGE", "WHEELCHAIR", "CRUTCH", "IV"]
                 ],
             },
             "Clothing & Accessories": {
-                "row_titles": ["Tops", "Bottoms", "Outerwear", "Footwear", "Accessories", "Seasonal"],
+                "row_titles": ["Tops", "Bottoms", "Outerwear", "Footwear", "Accessories", "Seasonal", "Predictive Text"],
                 "rows": [
-                    ["Shirt", "T-Shirt", "Blouse", "Tank Top", "Sweater", "Hoodie"],
-                    ["Pants", "Jeans", "Shorts", "Skirt", "Leggings", "Trousers"],
-                    ["Coat", "Jacket", "Blazer", "Raincoat", "Poncho", "Vest"],
-                    ["Shoes", "Boots", "Sandals", "Sneakers", "Heels", "Slippers"],
-                    ["Hat", "Gloves", "Scarf", "Belt", "Watch", "Sunglasses"],
-                    ["Swimsuit", "Snow Boots", "Winter Coat", "Thermals", "Flip Flops", "Rain Boots"]
+                    ["SHIRT", "T-SHIRT", "BLOUSE", "TANK TOP", "SWEATER", "HOODIE"],
+                    ["PANTS", "JEANS", "SHORTS", "SKIRT", "LEGGINGS", "TROUSERS"],
+                    ["COAT", "JACKET", "BLAZER", "RAINCOAT", "PONCHO", "VEST"],
+                    ["SHOES", "BOOTS", "SANDALS", "SNEAKERS", "HEELS", "SLIPPERS"],
+                    ["HAT", "GLOVES", "SCARF", "BELT", "WATCH", "SUNGLASSES"],
+                    ["SWIMSUIT", "SNOW BOOTS", "WINTER COAT", "THERMALS", "FLIP FLOPS", "RAIN BOOTS"]
                 ],
             },
             "Weather & Seasons": {
-                "row_titles": ["General Weather", "Seasons", "Precipitation", "Sky Conditions", "Wind", "Temperature"],
+                "row_titles": ["General Weather", "Seasons", "Precipitation", "Sky Conditions", "Wind", "Temperature", "Predictive Text"],
                 "rows": [
-                    ["Sunny", "Cloudy", "Rainy", "Snowy", "Foggy", "Stormy"],
-                    ["Spring", "Summer", "Autumn", "Winter", "Season", "Holiday"],
-                    ["Rain", "Snow", "Hail", "Drizzle", "Sleet", "Downpour"],
-                    ["Clear", "Overcast", "Cloudy", "Bright", "Dark", "Rainbow"],
-                    ["Windy", "Breezy", "Gusty", "Calm", "Hurricane", "Tornado"],
-                    ["Hot", "Cold", "Warm", "Cool", "Freezing", "Boiling"]
+                    ["SUNNY", "CLOUDY", "RAINY", "SNOWY", "FOGGY", "STORMY"],
+                    ["SPRING", "SUMMER", "AUTUMN", "WINTER", "SEASON", "HOLIDAY"],
+                    ["RAIN", "SNOW", "HAIL", "DRIZZLE", "SLEET", "DOWNPOUR"],
+                    ["CLEAR", "OVERCAST", "CLOUDY", "BRIGHT", "DARK", "RAINBOW"],
+                    ["WINDY", "BREEZY", "GUSTY", "CALM", "HURRICANE", "TORNADO"],
+                    ["HOT", "COLD", "WARM", "COOL", "FREEZING", "BOILING"]
                 ],
             },
             "Food & Drink": {
-                "row_titles": ["Fruits", "Vegetables", "Proteins", "Carbs", "Snacks", "Drinks"],
+                "row_titles": ["Fruits", "Vegetables", "Proteins", "Carbs", "Snacks", "Drinks", "Predictive Text"],
                 "rows": [
-                    ["Apple", "Banana", "Orange", "Peach", "Grape", "Mango"],
-                    ["Carrot", "Broccoli", "Potato", "Lettuce", "Onion", "Pepper"],
-                    ["Chicken", "Beef", "Fish", "Egg", "Tofu", "Pork"],
-                    ["Bread", "Rice", "Pasta", "Cereal", "Bagel", "Tortilla"],
-                    ["Chips", "Cookie", "Candy", "Cake", "Popcorn", "Pretzel"],
-                    ["Water", "Juice", "Milk", "Tea", "Coffee", "Soda"]
+                    ["APPLE", "BANANA", "ORANGE", "PEACH", "GRAPE", "MANGO"],
+                    ["CARROT", "BROCCOLI", "POTATO", "LETTUCE", "ONION", "PEPPER"],
+                    ["CHICKEN", "BEEF", "FISH", "EGG", "TOFU", "PORK"],
+                    ["BREAD", "RICE", "PASTA", "CEREAL", "BAGEL", "TORTILLA"],
+                    ["CHIPS", "COOKIE", "CANDY", "CAKE", "POPCORN", "PRETZEL"],
+                    ["WATER", "JUICE", "MILK", "TEA", "COFFEE", "SODA"]
                 ],
             },
             "Colors": {
-                "row_titles": ["Primary Colors", "Secondary Colors", "Neutrals", "Pastels", "Brights", "Dark Shades"],
+                "row_titles": ["Primary Colors", "Secondary Colors", "Neutrals", "Pastels", "Brights", "Dark Shades", "Predictive Text"],
                 "rows": [
-                    ["Red", "Blue", "Yellow", "Green", "Purple", "Orange"],
-                    ["Pink", "Brown", "Gray", "Black", "White", "Beige"],
-                    ["Gold", "Silver", "Bronze", "Charcoal", "Ivory", "Cream"],
-                    ["Lavender", "Peach", "Mint", "Coral", "Teal", "Maroon"],
-                    ["Scarlet", "Crimson", "Turquoise", "Amber", "Magenta", "Cyan"],
-                    ["Navy", "Indigo", "Olive", "Tan", "Violet", "Lilac"]
+                    ["RED", "BLUE", "YELLOW", "GREEN", "PURPLE", "ORANGE"],
+                    ["PINK", "BROWN", "GRAY", "BLACK", "WHITE", "BEIGE"],
+                    ["GOLD", "SILVER", "BRONZE", "CHARCOAL", "IVORY", "CREAM"],
+                    ["LAVENDER", "PEACH", "MINT", "CORAL", "TEAL", "MAROON"],
+                    ["SCARLET", "CRIMSON", "TURQUOISE", "AMBER", "MAGENTA", "CYAN"],
+                    ["NAVY", "INDIGO", "OLIVE", "TAN", "VIOLET", "LILAC"]
                 ],
             },
             "Numbers & Math": {
-                "row_titles": ["Single Digits", "Teens", "Tens", "Large Numbers", "Fractions", "Math Symbols"],
+                "row_titles": ["Single Digits", "Teens", "Tens", "Large Numbers", "Fractions", "Math Symbols", "Predictive Text"],
                 "rows": [
-                    ["One", "Two", "Three", "Four", "Five", "Six"],
-                    ["Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"],
-                    ["Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen"],
-                    ["Hundred", "Thousand", "Million", "Billion", "Trillion", "Zero"],
-                    ["Half", "Quarter", "Third", "Eighth", "Tenth", "Whole"],
-                    ["Plus", "Minus", "Times", "Divide", "Equals", "Percent"]
+                    ["ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX"],
+                    ["SEVEN", "EIGHT", "NINE", "TEN", "ELEVEN", "TWELVE"],
+                    ["THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN", "SEVENTEEN", "EIGHTEEN"],
+                    ["HUNDRED", "THOUSAND", "MILLION", "BILLION", "TRILLION", "ZERO"],
+                    ["HALF", "QUARTER", "THIRD", "EIGHTH", "TENTH", "WHOLE"],
+                    ["PLUS", "MINUS", "TIMES", "DIVIDE", "EQUALS", "PERCENT"]
                 ],
             },
             "Transportation": {
-                "row_titles": ["Land", "Water", "Air", "Public", "Emergency", "Miscellaneous"],
+                "row_titles": ["Land", "Water", "Air", "Public", "Emergency", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Car", "Truck", "Bike", "Motorcycle", "Bus", "Train"],
-                    ["Boat", "Ship", "Canoe", "Ferry", "Submarine", "Kayak"],
-                    ["Plane", "Helicopter", "Jet", "Glider", "Drone", "Balloon"],
-                    ["Taxi", "Subway", "Tram", "Metro", "Ride Share", "Trolley"],
-                    ["Ambulance", "Fire Truck", "Police Car", "Rescue Boat", "Patrol", "Helicopter"],
-                    ["Scooter", "Skateboard", "Hoverboard", "Segway", "RV", "ATV"]
+                    ["CAR", "TRUCK", "BIKE", "MOTORCYCLE", "BUS", "TRAIN"],
+                    ["BOAT", "SHIP", "CANOE", "FERRY", "SUBMARINE", "KAYAK"],
+                    ["PLANE", "HELICOPTER", "JET", "GLIDER", "DRONE", "BALLOON"],
+                    ["TAXI", "SUBWAY", "TRAM", "METRO", "RIDE SHARE", "TROLLEY"],
+                    ["AMBULANCE", "FIRE TRUCK", "POLICE CAR", "RESCUE BOAT", "PATROL", "HELICOPTER"],
+                    ["SCOOTER", "SKATEBOARD", "HOVERBOARD", "SEGWAY", "RV", "ATV"]
                 ],
             },
             "Work & Tools": {
-                "row_titles": ["Household", "Construction", "Garden", "Office", "Mechanical", "Power Tools"],
+                "row_titles": ["Household", "Construction", "Garden", "Office", "Mechanical", "Power Tools", "Predictive Text"],
                 "rows": [
-                    ["Broom", "Mop", "Vacuum", "Bucket", "Soap", "Duster"],
-                    ["Hammer", "Screwdriver", "Wrench", "Saw", "Drill", "Tape"],
-                    ["Shovel", "Rake", "Hoe", "Pruners", "Trowel", "Hose"],
-                    ["Pen", "Pencil", "Paper", "Eraser", "Stapler", "Tape"],
-                    ["Wrench", "Ratchet", "Clamp", "Socket", "Jack", "Hex Key"],
-                    ["Cordless Drill", "Chainsaw", "Sander", "Grinder", "Router", "Impact Driver"]
+                    ["BROOM", "MOP", "VACUUM", "BUCKET", "SOAP", "DUSTER"],
+                    ["HAMMER", "SCREWDRIVER", "WRENCH", "SAW", "DRILL", "TAPE"],
+                    ["SHOVEL", "RAKE", "HOE", "PRUNERS", "TROWEL", "HOSE"],
+                    ["PEN", "PENCIL", "PAPER", "ERASER", "STAPLER", "TAPE"],
+                    ["WRENCH", "RATCHET", "CLAMP", "SOCKET", "JACK", "HEX KEY"],
+                    ["CORDLESS DRILL", "CHAINSAW", "SANDER", "GRINDER", "ROUTER", "IMPACT DRIVER"]
                 ],
             },
             "School & Learning": {
-                "row_titles": ["Subjects", "Supplies", "People", "Places", "Activities", "Miscellaneous"],
+                "row_titles": ["Subjects", "Supplies", "People", "Places", "Activities", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Math", "Science", "History", "English", "Art", "Music"],
-                    ["Pencil", "Eraser", "Notebook", "Marker", "Ruler", "Glue"],
-                    ["Teacher", "Student", "Principal", "Counselor", "Coach", "Librarian"],
-                    ["Classroom", "Library", "Office", "Gym", "Cafeteria", "Playground"],
-                    ["Test", "Quiz", "Homework", "Project", "Presentation", "Assignment"],
-                    ["Chalk", "Board", "Textbook", "Computer", "Tablet", "Printer"]
+                    ["MATH", "SCIENCE", "HISTORY", "ENGLISH", "ART", "MUSIC"],
+                    ["PENCIL", "ERASER", "NOTEBOOK", "MARKER", "RULER", "GLUE"],
+                    ["TEACHER", "STUDENT", "PRINCIPAL", "COUNSELOR", "COACH", "LIBRARIAN"],
+                    ["CLASSROOM", "LIBRARY", "OFFICE", "GYM", "CAFETERIA", "PLAYGROUND"],
+                    ["TEST", "QUIZ", "HOMEWORK", "PROJECT", "PRESENTATION", "ASSIGNMENT"],
+                    ["CHALK", "BOARD", "TEXTBOOK", "COMPUTER", "TABLET", "PRINTER"]
                 ],
             },
             "Entertainment": {
-                "row_titles": ["Movies", "TV Shows", "Games", "Books", "Music", "Events"],
+                "row_titles": ["Movies", "TV Shows", "Games", "Books", "Music", "Events", "Predictive Text"],
                 "rows": [
-                    ["Comedy", "Drama", "Horror", "Action", "Romance", "Sci-Fi"],
-                    ["Cartoon", "Series", "Sitcom", "Reality", "News", "Documentary"],
-                    ["Video Game", "Board Game", "Cards", "Chess", "Trivia", "Puzzle"],
-                    ["Novel", "Mystery", "Biography", "Fantasy", "Poetry", "Comics"],
-                    ["Song", "Album", "Artist", "Band", "Playlist", "Concert"],
-                    ["Theater", "Festival", "Circus", "Parade", "Show", "Party"]
+                    ["COMEDY", "DRAMA", "HORROR", "ACTION", "ROMANCE", "SCI-FI"],
+                    ["CARTOON", "SERIES", "SITCOM", "REALITY", "NEWS", "DOCUMENTARY"],
+                    ["VIDEO GAME", "BOARD GAME", "CARDS", "CHESS", "TRIVIA", "PUZZLE"],
+                    ["NOVEL", "MYSTERY", "BIOGRAPHY", "FANTASY", "POETRY", "COMICS"],
+                    ["SONG", "ALBUM", "ARTIST", "BAND", "PLAYLIST", "CONCERT"],
+                    ["THEATER", "FESTIVAL", "CIRCUS", "PARADE", "SHOW", "PARTY"]
                 ],
             },
             "Animals": {
-                "row_titles": ["Pets", "Farm Animals", "Wild Animals", "Birds", "Reptiles", "Aquatic"],
+                "row_titles": ["Pets", "Farm Animals", "Wild Animals", "Birds", "Reptiles", "Aquatic", "Predictive Text"],
                 "rows": [
-                    ["Dog", "Cat", "Bird", "Fish", "Hamster", "Rabbit"],
-                    ["Cow", "Horse", "Pig", "Chicken", "Sheep", "Goat"],
-                    ["Lion", "Tiger", "Elephant", "Bear", "Wolf", "Deer"],
-                    ["Parrot", "Eagle", "Owl", "Crow", "Seagull", "Sparrow"],
-                    ["Snake", "Lizard", "Turtle", "Crocodile", "Iguana", "Gecko"],
-                    ["Shark", "Dolphin", "Whale", "Octopus", "Seal", "Crab"]
+                    ["DOG", "CAT", "BIRD", "FISH", "HAMSTER", "RABBIT"],
+                    ["COW", "HORSE", "PIG", "CHICKEN", "SHEEP", "GOAT"],
+                    ["LION", "TIGER", "ELEPHANT", "BEAR", "WOLF", "DEER"],
+                    ["PARROT", "EAGLE", "OWL", "CROW", "SEAGULL", "SPARROW"],
+                    ["SNAKE", "LIZARD", "TURTLE", "CROCODILE", "IGUANA", "GECKO"],
+                    ["SHARK", "DOLPHIN", "WHALE", "OCTOPUS", "SEAL", "CRAB"]
                 ],
             },
             "Nature": {
-                "row_titles": ["Landforms", "Water", "Sky", "Plants", "Weather", "Miscellaneous"],
+                "row_titles": ["Landforms", "Water", "Sky", "Plants", "Weather", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Mountain", "Valley", "Hill", "Canyon", "Desert", "Plateau"],
-                    ["River", "Lake", "Ocean", "Stream", "Pond", "Waterfall"],
-                    ["Sun", "Moon", "Stars", "Clouds", "Rainbow", "Sky"],
-                    ["Tree", "Flower", "Grass", "Cactus", "Bush", "Shrub"],
-                    ["Rain", "Snow", "Fog", "Hail", "Wind", "Storm"],
-                    ["Sand", "Rock", "Dirt", "Soil", "Ice", "Lava"]
+                    ["MOUNTAIN", "VALLEY", "HILL", "CANYON", "DESERT", "PLATEAU"],
+                    ["RIVER", "LAKE", "OCEAN", "STREAM", "POND", "WATERFALL"],
+                    ["SUN", "MOON", "STARS", "CLOUDS", "RAINBOW", "SKY"],
+                    ["TREE", "FLOWER", "GRASS", "CACTUS", "BUSH", "SHRUB"],
+                    ["RAIN", "SNOW", "FOG", "HAIL", "WIND", "STORM"],
+                    ["SAND", "ROCK", "DIRT", "SOIL", "ICE", "LAVA"]
                 ],
             },
             "Family & Proper Names": {
-                "row_titles": ["Immediate Family", "Friends", "Extended Family", "Pet Names", "Common Names", "Other"],
+                "row_titles": ["Immediate Family", "Friends", "Extended Family", "Pet Names", "Common Names", "Other", "Predictive Text"],
                 "rows": [
-                    ["Mom", "Dad", "Brother", "Sister", "Grandma", "Grandpa"],
-                    ["Friend", "Buddy", "Pal", "Neighbor", "Bestie", "Classmate"],
-                    ["Uncle", "Aunt", "Cousin", "Niece", "Nephew", "Guardian"],
-                    ["Rush", "Trixie", "Jazz", "Daisy", "Pepper", "Livingston"],
-                    ["Allen", "Lauren", "Bryan", "Ari", "Jake", "Nancy"],
-                    ["Jared", "Alexa", "Matthew", "Marissa", "Blake", "Leo"]
+                    ["MOM", "DAD", "BROTHER", "SISTER", "GRANDMA", "GRANDPA"],
+                    ["FRIEND", "BUDDY", "PAL", "NEIGHBOR", "BESTIE", "CLASSMATE"],
+                    ["UNCLE", "AUNT", "COUSIN", "NIECE", "NEPHEW", "GUARDIAN"],
+                    ["RUSH", "TRIXIE", "JAZZ", "DAISY", "PEPPER", "LIVINGSTON"],
+                    ["ALLEN", "LAUREN", "BRYAN", "ARI", "JAKE", "NANCY"],
+                    ["JARED", "ALEXA", "MATTHEW", "MARISSA", "BLAKE", "LEO"]
                 ],
             },
             "Emotions & Feelings": {
-                "row_titles": ["Positive", "Negative", "Neutral", "Intense", "Mild", "Physical States"],
+                "row_titles": ["Positive", "Negative", "Neutral", "Intense", "Mild", "Physical States", "Predictive Text"],
                 "rows": [
-                    ["Joyful", "Excited", "Grateful", "Proud", "Hopeful", "Optimistic"],
-                    ["Angry", "Frustrated", "Lonely", "Worried", "Ashamed", "Sad"],
-                    ["Okay", "Fine", "Calm", "Content", "Neutral", "Meh"],
-                    ["Shocked", "Overwhelmed", "Anxious", "Terrified", "Eager", "Elated"],
-                    ["Annoyed", "Bored", "Confused", "Shy", "Jealous", "Scared"],
-                    ["Tired", "Hungry", "Thirsty", "Hot", "Cold", "Sick"]
+                    ["JOYFUL", "EXCITED", "GRATEFUL", "PROUD", "HOPEFUL", "OPTIMISTIC"],
+                    ["ANGRY", "FRUSTRATED", "LONELY", "WORRIED", "ASHAMED", "SAD"],
+                    ["OKAY", "FINE", "CALM", "CONTENT", "NEUTRAL", "MEH"],
+                    ["SHOCKED", "OVERWHELMED", "ANXIOUS", "TERRIFIED", "EAGER", "ELATED"],
+                    ["ANNOYED", "BORED", "CONFUSED", "SHY", "JEALOUS", "SCARED"],
+                    ["TIRED", "HUNGRY", "THIRSTY", "HOT", "COLD", "SICK"]
                 ],
             },
             "Travel & Vacations": {
-                "row_titles": ["Transportation", "Lodging", "Activities", "Essentials", "Documents", "Destinations"],
+                "row_titles": ["Transportation", "Lodging", "Activities", "Essentials", "Documents", "Destinations", "Predictive Text"],
                 "rows": [
-                    ["Car", "Bus", "Train", "Plane", "Bike", "Boat"],
-                    ["Hotel", "Hostel", "Motel", "Resort", "Cabin", "Airbnb"],
-                    ["Hiking", "Camping", "Fishing", "Skiing", "Sightseeing", "Swimming"],
-                    ["Backpack", "Snacks", "Water", "Camera", "Map", "Suitcase"],
-                    ["Passport", "Visa", "ID", "Ticket", "Guidebook", "Reservation"],
-                    ["Beach", "Mountain", "City", "Forest", "Island", "Village"]
+                    ["CAR", "BUS", "TRAIN", "PLANE", "BIKE", "BOAT"],
+                    ["HOTEL", "HOSTEL", "MOTEL", "RESORT", "CABIN", "AIRBNB"],
+                    ["HIKING", "CAMPING", "FISHING", "SKIING", "SIGHTSEEING", "SWIMMING"],
+                    ["BACKPACK", "SNACKS", "WATER", "CAMERA", "MAP", "SUITCASE"],
+                    ["PASSPORT", "VISA", "ID", "TICKET", "GUIDEBOOK", "RESERVATION"],
+                    ["BEACH", "MOUNTAIN", "CITY", "FOREST", "ISLAND", "VILLAGE"]
                 ],
             },
             "Holidays & Celebrations": {
-                "row_titles": ["Winter Holidays", "Spring Holidays", "Summer Holidays", "Fall Holidays", "Festivals", "Miscellaneous"],
+                "row_titles": ["Winter Holidays", "Spring Holidays", "Summer Holidays", "Fall Holidays", "Festivals", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Christmas", "New Year", "Hanukkah", "Kwanzaa", "Diwali", "Eid"],
-                    ["Easter", "Passover", "Purim", "Ramadan", "Earth Day", "Lent"],
-                    ["Independence Day", "Father's Day", "Mother's Day", "Labor Day", "Bastille", "Memorial Day"],
-                    ["Halloween", "Thanksgiving", "Harvest", "Veterans", "Oktoberfest", "Columbus"],
-                    ["Birthday", "Anniversary", "Graduation", "Parade", "Concert", "Party"],
-                    ["Fair", "Circus", "Show", "Fireworks", "Festival", "Wedding"]
+                    ["CHRISTMAS", "NEW YEAR", "HANUKKAH", "KWANZAA", "DIWALI", "EID"],
+                    ["EASTER", "PASSOVER", "PURIM", "RAMADAN", "EARTH DAY", "LENT"],
+                    ["INDEPENDENCE DAY", "FATHER'S DAY", "MOTHER'S DAY", "LABOR DAY", "BASTILLE", "MEMORIAL DAY"],
+                    ["HALLOWEEN", "THANKSGIVING", "HARVEST", "VETERANS", "OKTOBERFEST", "COLUMBUS"],
+                    ["BIRTHDAY", "ANNIVERSARY", "GRADUATION", "PARADE", "CONCERT", "PARTY"],
+                    ["FAIR", "CIRCUS", "SHOW", "FIREWORKS", "FESTIVAL", "WEDDING"]
                 ],
             },
             "Shopping & Money": {
-                "row_titles": ["General Shopping", "Groceries", "Clothing", "Electronics", "Furniture", "Other"],
+                "row_titles": ["General Shopping", "Groceries", "Clothing", "Electronics", "Furniture", "Other", "Predictive Text"],
                 "rows": [
-                    ["Mall", "Store", "Shop", "Cart", "Bag", "Checkout"],
-                    ["Bread", "Eggs", "Milk", "Cheese", "Fruit", "Vegetables"],
-                    ["Shoes", "Shirt", "Pants", "Jacket", "Hat", "Scarf"],
-                    ["Phone", "Tablet", "TV", "Camera", "Laptop", "Speaker"],
-                    ["Desk", "Chair", "Table", "Bed", "Cabinet", "Couch"],
-                    ["Cash", "Card", "Coupon", "Receipt", "Sale", "Barcode"]
+                    ["MALL", "STORE", "SHOP", "CART", "BAG", "CHECKOUT"],
+                    ["BREAD", "EGGS", "MILK", "CHEESE", "FRUIT", "VEGETABLES"],
+                    ["SHOES", "SHIRT", "PANTS", "JACKET", "HAT", "SCARF"],
+                    ["PHONE", "TABLET", "TV", "CAMERA", "LAPTOP", "SPEAKER"],
+                    ["DESK", "CHAIR", "TABLE", "BED", "CABINET", "COUCH"],
+                    ["CASH", "CARD", "COUPON", "RECEIPT", "SALE", "BARCODE"]
                 ],
             },
             "Technology & Media": {
-                "row_titles": ["Devices", "Components", "Networks", "Software", "Accessories", "Other"],
+                "row_titles": ["Devices", "Components", "Networks", "Software", "Accessories", "Other", "Predictive Text"],
                 "rows": [
-                    ["Phone", "Tablet", "Monitor", "Camera", "Laptop", "Desktop"],
-                    ["CPU", "GPU", "RAM", "SSD", "Battery", "Charger"],
-                    ["WiFi", "Router", "Server", "Cloud", "Ethernet", "Bluetooth"],
-                    ["App", "Browser", "Game", "Tool", "Website", "Editor"],
-                    ["Keyboard", "Mouse", "Speaker", "Dock", "Microphone", "Cable"],
-                    ["Music", "Video", "Photo", "Podcast", "Stream", "Playlist"]
+                    ["PHONE", "TABLET", "MONITOR", "CAMERA", "LAPTOP", "DESKTOP"],
+                    ["CPU", "GPU", "RAM", "SSD", "BATTERY", "CHARGER"],
+                    ["WIFI", "ROUTER", "SERVER", "CLOUD", "ETHERNET", "BLUETOOTH"],
+                    ["APP", "BROWSER", "GAME", "TOOL", "WEBSITE", "EDITOR"],
+                    ["KEYBOARD", "MOUSE", "SPEAKER", "DOCK", "MICROPHONE", "CABLE"],
+                    ["MUSIC", "VIDEO", "PHOTO", "PODCAST", "STREAM", "PLAYLIST"]
                 ],
             },
 
             "Verbs & Actions": {
-                "row_titles": ["General Actions", "Movement", "Speech", "Work", "Play", "Emotion"],
+                "row_titles": ["General Actions", "Movement", "Speech", "Work", "Play", "Emotion", "Predictive Text"],
                 "rows": [
-                    ["Begin", "Create", "Discover", "Solve", "Try", "Achieve"],
-                    ["Leap", "Crawl", "Slide", "Spin", "Kick", "Glide"],
-                    ["Debate", "Narrate", "Declare", "Repeat", "Mutter", "Exclaim"],
-                    ["Analyze", "Assemble", "Calculate", "Design", "Program", "Draft"],
-                    ["Sketch", "Build", "Explore", "Invent", "Roleplay", "Compete"],
-                    ["Admire", "Forgive", "Comfort", "Encourage", "Ponder", "Wonder"]
+                    ["BEGIN", "CREATE", "DISCOVER", "SOLVE", "TRY", "ACHIEVE"],
+                    ["LEAP", "CRAWL", "SLIDE", "SPIN", "KICK", "GLIDE"],
+                    ["DEBATE", "NARRATE", "DECLARE", "REPEAT", "MUTTER", "EXCLAIM"],
+                    ["ANALYZE", "ASSEMBLE", "CALCULATE", "DESIGN", "PROGRAM", "DRAFT"],
+                    ["SKETCH", "BUILD", "EXPLORE", "INVENT", "ROLEPLAY", "COMPETE"],
+                    ["ADMIRE", "FORGIVE", "COMFORT", "ENCOURAGE", "PONDER", "WONDER"]
                 ],
             },
             "Household": {
-                "row_titles": ["Rooms", "Appliances", "Furniture", "Cleaning Supplies", "Decorations", "Miscellaneous"],
+                "row_titles": ["Rooms", "Appliances", "Furniture", "Cleaning Supplies", "Decorations", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Pantry", "Attic", "Basement", "Closet", "Hallway", "Balcony"],
-                    ["Stove", "Blender", "Freezer", "Kettle", "Toaster", "Air Fryer"],
-                    ["Armchair", "Stool", "Bookshelf", "Hammock", "Crib", "Bench"],
-                    ["Dustpan", "Cleaning Cloth", "Brush", "Squeegee", "Cleaner", "Disinfectant"],
-                    ["Candle", "Photo Frame", "Plant Pot", "Wall Art", "Clock", "Shelf"],
-                    ["Ladder", "Toolbox", "Remote", "Thermostat", "Power Strip", "Doorbell"]
+                    ["PANTRY", "ATTIC", "BASEMENT", "CLOSET", "HALLWAY", "BALCONY"],
+                    ["STOVE", "BLENDER", "FREEZER", "KETTLE", "TOASTER", "AIR FRYER"],
+                    ["ARMCHAIR", "STOOL", "BOOKSHELF", "HAMMOCK", "CRIB", "BENCH"],
+                    ["DUSTPAN", "CLEANING CLOTH", "BRUSH", "SQUEEGEE", "CLEANER", "DISINFECTANT"],
+                    ["CANDLE", "PHOTO FRAME", "PLANT POT", "WALL ART", "CLOCK", "SHELF"],
+                    ["LADDER", "TOOLBOX", "REMOTE", "THERMOSTAT", "POWER STRIP", "DOORBELL"]
                 ],
             },
             "Sports & Activities": {
-                "row_titles": ["Team Sports", "Individual Sports", "Outdoor Activities", "Indoor Activities", "Water Sports", "Other Activities"],
+                "row_titles": ["Team Sports", "Individual Sports", "Outdoor Activities", "Indoor Activities", "Water Sports", "Other Activities", "Predictive Text"],
                 "rows": [
-                    ["Cricket", "Rugby", "Softball", "Lacrosse", "Field Hockey", "Ultimate Frisbee"],
-                    ["Badminton", "Fencing", "Judo", "Taekwondo", "Track", "Figure Skating"],
-                    ["Rock Climbing", "Orienteering", "Geocaching", "Trail Running", "Stargazing", "Birdwatching"],
-                    ["Pool", "Table Tennis", "Foosball", "Martial Arts", "Pottery", "Baking"],
-                    ["Snorkeling", "Kayaking", "Canoeing", "Scuba Diving", "Water Skiing", "Wakeboarding"],
-                    ["Snowshoeing", "Ice Skating", "Surfing", "Parkour", "Curling", "Zumba"]
+                    ["CRICKET", "RUGBY", "SOFTBALL", "LACROSSE", "FIELD HOCKEY", "ULTIMATE FRISBEE"],
+                    ["BADMINTON", "FENCING", "JUDO", "TAEKWONDO", "TRACK", "FIGURE SKATING"],
+                    ["ROCK CLIMBING", "ORIENTEERING", "GEOCACHING", "TRAIL RUNNING", "STARGAZING", "BIRDWATCHING"],
+                    ["POOL", "TABLE TENNIS", "FOOSBALL", "MARTIAL ARTS", "POTTERY", "BAKING"],
+                    ["SNORKELING", "KAYAKING", "CANOEING", "SCUBA DIVING", "WATER SKIING", "WAKEBOARDING"],
+                    ["SNOWSHOEING", "ICE SKATING", "SURFING", "PARKOUR", "CURLING", "ZUMBA"]
                 ],
             },
             "Hobbies & Interests": {
-                "row_titles": ["Arts & Crafts", "Music", "Gardening", "Collecting", "Technology", "Games"],
+                "row_titles": ["Arts & Crafts", "Music", "Gardening", "Collecting", "Technology", "Games", "Predictive Text"],
                 "rows": [
-                    ["Origami", "Calligraphy", "Weaving", "Woodworking", "Embroidery", "Quilting"],
-                    ["Harmonica", "Bass", "Keyboard", "Flute", "Saxophone", "Viola"],
-                    ["Herbs", "Vegetables", "Flowers", "Fruit Trees", "Succulents", "Vines"],
-                    ["Vintage Items", "Toys", "Rocks", "Artifacts", "Memorabilia", "Postcards"],
-                    ["Drones", "VR", "AI Projects", "Home Automation", "Coding Challenges", "Data Visualization"],
-                    ["RPGs", "Simulations", "Mystery Games", "Party Games", "Escape Rooms", "Word Games"]
+                    ["ORIGAMI", "CALLIGRAPHY", "WEAVING", "WOODWORKING", "EMBROIDERY", "QUILTING"],
+                    ["HARMONICA", "BASS", "KEYBOARD", "FLUTE", "SAXOPHONE", "VIOLA"],
+                    ["HERBS", "VEGETABLES", "FLOWERS", "FRUIT TREES", "SUCCULENTS", "VINES"],
+                    ["VINTAGE ITEMS", "TOYS", "ROCKS", "ARTIFACTS", "MEMORABILIA", "POSTCARDS"],
+                    ["DRONES", "VR", "AI PROJECTS", "HOME AUTOMATION", "CODING CHALLENGES", "DATA VISUALIZATION"],
+                    ["RPGS", "SIMULATIONS", "MYSTERY GAMES", "PARTY GAMES", "ESCAPE ROOMS", "WORD GAMES"]
                 ],
             },
             "Jobs & Professions": {
-                "row_titles": ["Medical", "Education", "Technology", "Trades", "Creative", "Service"],
+                "row_titles": ["Medical", "Education", "Technology", "Trades", "Creative", "Service", "Predictive Text"],
                 "rows": [
-                    ["Optometrist", "Radiologist", "Pharmacist", "Veterinarian", "Orthodontist", "Midwife"],
-                    ["Dean", "Substitute", "Assistant", "Researcher", "Specialist", "Trainer"],
-                    ["Architect", "Developer", "SysAdmin", "Data Scientist", "Cryptographer", "AI Engineer"],
-                    ["Plasterer", "Bricklayer", "Blacksmith", "Landscaper", "Plumber", "Roofer"],
-                    ["Cartoonist", "Animator", "Set Designer", "Screenwriter", "Composer", "Lyricist"],
-                    ["Barber", "Butcher", "Tailor", "Receptionist", "Courier", "Waitstaff"]
+                    ["OPTOMETRIST", "RADIOLOGIST", "PHARMACIST", "VETERINARIAN", "ORTHODONTIST", "MIDWIFE"],
+                    ["DEAN", "SUBSTITUTE", "ASSISTANT", "RESEARCHER", "SPECIALIST", "TRAINER"],
+                    ["ARCHITECT", "DEVELOPER", "SYSADMIN", "DATA SCIENTIST", "CRYPTOGRAPHER", "AI ENGINEER"],
+                    ["PLASTERER", "BRICKLAYER", "BLACKSMITH", "LANDSCAPER", "PLUMBER", "ROOFER"],
+                    ["CARTOONIST", "ANIMATOR", "SET DESIGNER", "SCREENWRITER", "COMPOSER", "LYRICIST"],
+                    ["BARBER", "BUTCHER", "TAILOR", "RECEPTIONIST", "COURIER", "WAITSTAFF"]
                 ],
             },
 
             "Simpsons/Futurama": {
-                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous"],
+                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Homer", "Marge", "Bart", "Lisa", "Maggie", "Milhouse"],  # Main Characters
-                    ["Bender", "Fry", "Leela", "Zoidberg", "Professor", "Amy"],  # Supporting Characters
-                    ["Mr. Burns", "Smithers", "Moe", "Barney", "Lenny", "Carl"],  # Antagonists
-                    ["Krusty", "Apu", "Comic Book Guy", "Ralph", "Nelson", "Skinner"],  # Secondary Characters
-                    ["Robot Devil", "Hermes", "Scruffy", "Kif", "Zapp", "Mom"],  # Iconic Items/Places
-                    ["Itchy", "Scratchy", "Futurama Ship", "Nibbler", "Hypnotoad", "Slurm"],  # Miscellaneous
+                    ["HOMER", "MARGE", "BART", "LISA", "MAGGIE", "MILHOUSE"],  # MAIN CHARACTERS
+                    ["BENDER", "FRY", "LEELA", "ZOIDBERG", "PROFESSOR", "AMY"],  # SUPPORTING CHARACTERS
+                    ["MR. BURNS", "SMITHERS", "MOE", "BARNEY", "LENNY", "CARL"],  # ANTAGONISTS
+                    ["KRUSTY", "APU", "COMIC BOOK GUY", "RALPH", "NELSON", "SKINNER"],  # SECONDARY CHARACTERS
+                    ["ROBOT DEVIL", "HERMES", "SCRUFFY", "KIF", "ZAPP", "MOM"],  # ICONIC ITEMS/PLACES
+                    ["ITCHY", "SCRATCHY", "FUTURAMA SHIP", "NIBBLER", "HYPNOTOAD", "SLURM"],  # Miscellaneous
                 ]
             },
 
             "Family Guy/American Dad": {
-                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous"],
+                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Peter", "Lois", "Stewie", "Brian", "Chris", "Meg"],  # Main Characters
-                    ["Quagmire", "Cleveland", "Joe", "Mort", "Dr. Hartman", "Herbert"],  # Supporting Characters
-                    ["Stan", "Francine", "Steve", "Roger", "Hayley", "Klaus"],  # Antagonists
-                    ["Chris", "Principal Shepherd", "Neil", "Consuela", "Seamus", "Tricia"],  # Secondary Characters
-                    ["The Chicken", "Death", "Angela", "Bruce", "Jillian", "Tom Tucker"],  # Iconic Items/Places
-                    ["Ricky Spanish", "Bullock", "Greg", "Terry", "Barry", "Snot"],  # Miscellaneous
+                    ["PETER", "LOIS", "STEWIE", "BRIAN", "CHRIS", "MEG"],  # MAIN CHARACTERS
+                    ["QUAGMIRE", "CLEVELAND", "JOE", "MORT", "DR. HARTMAN", "HERBERT"],  # SUPPORTING CHARACTERS
+                    ["STAN", "FRANCINE", "STEVE", "ROGER", "HAYLEY", "KLAUS"],  # ANTAGONISTS
+                    ["CHRIS", "PRINCIPAL SHEPHERD", "NEIL", "CONSUELA", "SEAMUS", "TRICIA"],  # SECONDARY CHARACTERS
+                    ["THE CHICKEN", "DEATH", "ANGELA", "BRUCE", "JILLIAN", "TOM TUCKER"],  # ICONIC ITEMS/PLACES
+                    ["RICKY SPANISH", "BULLOCK", "GREG", "TERRY", "BARRY", "SNOT"],  # Miscellaneous
                 ]
             },
             "South Park": {
-                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous"],
+                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Cartman", "Stan", "Kyle", "Kenny", "Butters", "Wendy"],  # Main Characters
-                    ["Randy", "Sharon", "Shelly", "Mr. Garrison", "Mr. Mackey", "Chef"],  # Supporting Characters
-                    ["Token", "Jimmy", "Timmy", "Craig", "Tweek", "Clyde"],  # Antagonists
-                    ["Terrance", "Phillip", "PC Principal", "Satan", "Mr. Hankey", "Big Gay Al"],  # Secondary Characters
-                    ["Mayor", "Dr. Mephesto", "Principal Victoria", "Lemmiwinks", "Ike", "Pip"],  # Iconic Items/Places
-                    ["ManBearPig", "Cartman's Mom", "Starvin' Marvin", "Ms. Choksondik", "Nathan", "Scott Tenorman"],  # Miscellaneous
+                    ["CARTMAN", "STAN", "KYLE", "KENNY", "BUTTERS", "WENDY"],  # MAIN CHARACTERS
+                    ["RANDY", "SHARON", "SHELLY", "MR. GARRISON", "MR. MACKEY", "CHEF"],  # SUPPORTING CHARACTERS
+                    ["TOKEN", "JIMMY", "TIMMY", "CRAIG", "TWEEK", "CLYDE"],  # ANTAGONISTS
+                    ["TERRANCE", "PHILLIP", "PC PRINCIPAL", "SATAN", "MR. HANKEY", "BIG GAY AL"],  # SECONDARY CHARACTERS
+                    ["MAYOR", "DR. MEPHESTO", "PRINCIPAL VICTORIA", "LEMMIWINKS", "IKE", "PIP"],  # ICONIC ITEMS/PLACES
+                    ["MANBEARPIG", "CARTMAN'S MOM", "STARVIN' MARVIN", "MS. CHOKSONDIK", "NATHAN", "SCOTT TENORMAN"],  # Miscellaneous
                 ]
             },
             "Dragon Ball Universe": {
-                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous"],
+                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Goku", "Vegeta", "Piccolo", "Krillin", "Bulma", "Trunks"],  # Main Characters
-                    ["Frieza", "Cell", "Majin Buu", "Gohan", "Chi-Chi", "Yamcha"],  # Supporting Characters
-                    ["Tien", "Chiaotzu", "Android 18", "Android 17", "Master Roshi", "Videl"],  # Antagonists
-                    ["Beerus", "Whis", "Jiren", "Zeno", "Raditz", "Nappa"],  # Secondary Characters
-                    ["Goten", "Bardock", "Kame House", "Korin", "Kami", "Dende"],  # Iconic Items/Places
-                    ["Dragon Balls", "Nimbus", "Fusion", "Spirit Bomb", "Ultra Instinct", "Saiyan"],  # Miscellaneous
+                    ["GOKU", "VEGETA", "PICCOLO", "KRILLIN", "BULMA", "TRUNKS"],  # MAIN CHARACTERS
+                    ["FRIEZA", "CELL", "MAJIN BUU", "GOHAN", "CHI-CHI", "YAMCHA"],  # SUPPORTING CHARACTERS
+                    ["TIEN", "CHIAOTZU", "ANDROID 18", "ANDROID 17", "MASTER ROSHI", "VIDEL"],  # ANTAGONISTS
+                    ["BEERUS", "WHIS", "JIREN", "ZENO", "RADITZ", "NAPPA"],  # SECONDARY CHARACTERS
+                    ["GOTEN", "BARDOCK", "KAME HOUSE", "KORIN", "KAMI", "DENDE"],  # ICONIC ITEMS/PLACES
+                    ["DRAGON BALLS", "NIMBUS", "FUSION", "SPIRIT BOMB", "ULTRA INSTINCT", "SAIYAN"],  # Miscellaneous
                 ]
             },
             "Drake & Josh/iCarly/Victorious": {
-                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous"],
+                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Drake", "Josh", "Megan", "Walter", "Audrey", "Crazy Steve"],  # Main Characters
-                    ["Carly", "Sam", "Freddie", "Spencer", "Gibby", "Nevel"],  # Supporting Characters
-                    ["Tori", "Andre", "Jade", "Beck", "Cat", "Robbie"],  # Antagonists
-                    ["Helen", "Mrs. Benson", "Trina", "Sinjin", "Lane", "Socko"],  # Secondary Characters
-                    ["Peck", "Shampoo Hat", "Movie Theater", "iCarly Show", "Pear Phone", "Smoothie"],  # Iconic Items/Places
-                    ["Hollywood Arts", "Spaghetti Tacos", "Puppets", "Spencer's Sculptures", "Mood App", "Groovy Smoothie"],  # Miscellaneous
+                    ["DRAKE", "JOSH", "MEGAN", "WALTER", "AUDREY", "CRAZY STEVE"],  # MAIN CHARACTERS
+                    ["CARLY", "SAM", "FREDDIE", "SPENCER", "GIBBY", "NEVEL"],  # SUPPORTING CHARACTERS
+                    ["TORI", "ANDRE", "JADE", "BECK", "CAT", "ROBBIE"],  # ANTAGONISTS
+                    ["HELEN", "MRS. BENSON", "TRINA", "SINJIN", "LANE", "SOCKO"],  # SECONDARY CHARACTERS
+                    ["PECK", "SHAMPOO HAT", "MOVIE THEATER", "ICARLY SHOW", "PEAR PHONE", "SMOOTHIE"],  # ICONIC ITEMS/PLACES
+                    ["HOLLYWOOD ARTS", "SPAGHETTI TACOS", "PUPPETS", "SPENCER'S SCULPTURES", "MOOD APP", "GROOVY SMOOTHIE"],  # Miscellaneous
                 ]
             },
             "Rugrats/Spongebob": {
-                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous"],
+                "row_titles": ["Main Characters", "Supporting Characters", "Antagonists", "Secondary Characters", "Iconic Items/Places", "Miscellaneous", "Predictive Text"],
                 "rows": [
-                    ["Tommy", "Chuckie", "Phil", "Lil", "Angelica", "Dil"],  # Main Characters
-                    ["Stu", "Didi", "Grandpa", "Spike", "Susie", "Kimi"],  # Supporting Characters
-                    ["Spongebob", "Patrick", "Squidward", "Mr. Krabs", "Sandy", "Plankton"],  # Antagonists
-                    ["Gary", "Karen", "Bubble Buddy", "Mermaid Man", "Barnacle Boy", "Flying Dutchman"],  # Secondary Characters
-                    ["Jellyfish", "Krusty Krab", "Chum Bucket", "Goofy Goober", "Pineapple", "Lagoon"],  # Iconic Items/Places
-                    ["Reptar", "Pickles", "Angelica's Doll", "Rugrats Adventures", "Tide Pool", "Bikini Bottom"],  # Miscellaneous
+                    ["TOMMY", "CHUCKIE", "PHIL", "LIL", "ANGELICA", "DIL"],  # MAIN CHARACTERS
+                    ["STU", "DIDI", "GRANDPA", "SPIKE", "SUSIE", "KIMI"],  # SUPPORTING CHARACTERS
+                    ["SPONGEBOB", "PATRICK", "SQUIDWARD", "MR. KRABS", "SANDY", "PLANKTON"],  # ANTAGONISTS
+                    ["GARY", "KAREN", "BUBBLE BUDDY", "MERMAID MAN", "BARNACLE BOY", "FLYING DUTCHMAN"],  # SECONDARY CHARACTERS
+                    ["JELLYFISH", "KRUSTY KRAB", "CHUM BUCKET", "GOOFY GOOBER", "PINEAPPLE", "LAGOON"],  # ICONIC ITEMS/PLACES
+                    ["REPTAR", "PICKLES", "ANGELICA'S DOLL", "RUGRATS ADVENTURES", "TIDE POOL", "BIKINI BOTTOM"],  # Miscellaneous
                 ]
             }
         }
