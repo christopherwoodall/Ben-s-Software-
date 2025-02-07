@@ -363,7 +363,7 @@ class KeyboardFrame(tk.Frame):
             if press_duration > 3:
                 print("Spacebar held for more than 3 seconds. Scanning backward.")
                 self.scan_backward()
-                time.sleep(2)  # Scan backward every 2 seconds while held
+                time.sleep(1.5)  # Scan backward every 1.5 seconds while held
 
             # Small delay to prevent excessive CPU usage
             time.sleep(0.1)
