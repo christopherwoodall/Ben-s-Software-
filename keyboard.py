@@ -156,10 +156,11 @@ class KeyboardFrame(tk.Frame):
 
     def create_layout(self):
         """Create the layout for the current mode."""
+        # Clear any existing widgets.
         for widget in self.winfo_children():
-            widget.destroy()  # Clear existing widgets
+            widget.destroy()
 
-        # Create the text display bar (row 0)
+        # Create the text display bar (row 0).
         self.text_bar_button = tk.Button(
             self,
             textvariable=self.current_text,
@@ -169,12 +170,30 @@ class KeyboardFrame(tk.Frame):
         )
         self.text_bar_button.grid(row=0, column=0, columnspan=6, sticky="nsew")
 
-        # Create buttons for each row
+        # Create buttons for each row.
         self.buttons = []
         for row_index, row_keys in enumerate(self.rows):
             button_row = []
             for col_index, key in enumerate(row_keys):
-                font_size = 48 if self.current_mode == "Keyboard" else (12 if len(key) > 10 else 24)
+                # If this is the predictive text row (assumed to be the last row), adjust font size.
+                if row_index == len(self.rows) - 1:
+                    # For predictive row, use dynamic font sizing based on key length.
+                    if not key:
+                        # If the key is empty, use a default small size.
+                        font_size = 24
+                    else:
+                        # Adjust thresholds as desired.
+                        if len(key) <= 5:
+                            font_size = 48
+                        elif len(key) <= 8:
+                            font_size = 36
+                        elif len(key) <= 12:
+                            font_size = 24
+                        else:
+                            font_size = 18
+                else:
+                    # For other rows, use your usual font sizing.
+                    font_size = 48 if self.current_mode == "Keyboard" else (12 if len(key) > 10 else 24)
                 btn = tk.Button(
                     self,
                     text=key,
@@ -182,20 +201,14 @@ class KeyboardFrame(tk.Frame):
                     bg="light blue",
                     command=lambda k=key: self.handle_button_press(k),
                 )
-                btn.grid(row=row_index + 1, column=col_index, sticky="nsew")  # Offset by 1 for the text bar
+                btn.grid(row=row_index + 1, column=col_index, sticky="nsew")  # Offset by 1 for the text bar.
                 button_row.append(btn)
             self.buttons.append(button_row)
 
-        # Configure the grid
-        for i in range(len(self.rows) + 1):  # Include the text box
+        # Configure the grid so that rows and columns expand evenly.
+        for i in range(len(self.rows) + 1):  # Include the text bar row.
             self.grid_rowconfigure(i, weight=1)
-        for j in range(6):  # Always 6 columns
-            self.grid_columnconfigure(j, weight=1)
-
-        # Configure the grid
-        for i in range(len(self.rows) + 1):  # Include the text box
-            self.grid_rowconfigure(i, weight=1)
-        for j in range(6):  # Always 6 columns
+        for j in range(6):  # Always 6 columns.
             self.grid_columnconfigure(j, weight=1)
 
     def create_button(self, text, command):
@@ -270,25 +283,52 @@ class KeyboardFrame(tk.Frame):
         self.bind_all("<KeyPress-Return>", self.start_selecting)
         self.bind_all("<KeyRelease-Return>", self.stop_selecting)
 
+    def clear_all_highlights(self):
+        """Clears highlights from the text bar and all button rows."""
+        # Reset the text bar background.
+        self.text_bar_button.config(bg="light blue")
+        # Reset each button's background in every row.
+        for row in self.buttons:
+            for btn in row:
+                btn.config(bg="light blue")
+
     def start_selecting(self, event):
-        """Start tracking when the Return key is pressed."""
+        # Record the time when the Return key is pressed.
         if not hasattr(self, "return_press_time") or self.return_press_time is None:
-            self.return_press_time = time.time()  # Record the press time
+            self.return_press_time = time.time()
+            self.long_press_triggered = False  # Reset the long-press flag.
             print("Return key pressed.")
+            # Schedule a callback to check if the key is held for 3 seconds.
+            self.after(3000, self.check_long_press)
+
+    def check_long_press(self):
+        # This callback is executed after 3 seconds.
+        # If the Return key is still held (return_press_time still set),
+        # then trigger the long press behavior.
+        if self.return_press_time is not None and (time.time() - self.return_press_time) >= 3:
+            # Assume the predictive text row is the last row.
+            predictive_row_index = len(self.rows)  # Row 0 is text bar; rows 1...N are buttons.
+            # Clear any previous highlights.
+            self.clear_all_highlights()
+            # Set the current row index to the predictive row.
+            self.current_row_index = predictive_row_index
+            self.in_row_selection_mode = True
+            # Highlight the predictive row.
+            self.highlight_row(self.current_row_index)
+            self.long_press_triggered = True
+            print("Long press detected: Jumped to predictive text row.")
 
     def stop_selecting(self, event):
-        """Handle selection logic when the Return key is released."""
         if hasattr(self, "return_press_time") and self.return_press_time is not None:
             press_duration = time.time() - self.return_press_time
             print(f"Return key released after {press_duration:.2f} seconds.")
-
-            # Activate selection only if the key was held for at least 0.1 seconds
-            if press_duration >= 0.1:
-                print("Select action triggered.")
+            # If a long press was not triggered, handle as a short press.
+            if not self.long_press_triggered and press_duration >= 0.1:
+                print("Short press detected: Select action triggered.")
                 self.select_button()
-
-            # Reset the press time
+            # Reset the press time and long-press flag.
             self.return_press_time = None
+            self.long_press_triggered = False
 
     def start_scanning(self, event):
         """Start tracking when the spacebar is pressed."""
