@@ -302,21 +302,30 @@ class KeyboardFrame(tk.Frame):
             self.after(3000, self.check_long_press)
 
     def check_long_press(self):
-        # This callback is executed after 3 seconds.
-        # If the Return key is still held (return_press_time still set),
-        # then trigger the long press behavior.
+        """
+        Called via after() when the Return key has been held for 3 seconds.
+        This method clears previous highlights, jumps to the predictive text row,
+        highlights that row, and then reads it aloud using TTS.
+        """
         if self.return_press_time is not None and (time.time() - self.return_press_time) >= 3:
-            # Assume the predictive text row is the last row.
-            predictive_row_index = len(self.rows)  # Row 0 is text bar; rows 1...N are buttons.
             # Clear any previous highlights.
             self.clear_all_highlights()
-            # Set the current row index to the predictive row.
+            # Assume your predictive text row is the last row.
+            predictive_row_index = len(self.rows)  # Row 0 is text bar; rows 1..N are buttons.
             self.current_row_index = predictive_row_index
             self.in_row_selection_mode = True
-            # Highlight the predictive row.
             self.highlight_row(self.current_row_index)
             self.long_press_triggered = True
             print("Long press detected: Jumped to predictive text row.")
+            # Call TTS on the predictive row.
+            self.read_predictive_tts()
+
+    def read_predictive_tts(self):
+        """
+        Reads aloud a fixed message "Predictive Text" when the predictive row is highlighted.
+        """
+        self.tts_engine.say("Predictive Text")
+        self.tts_engine.runAndWait()
 
     def stop_selecting(self, event):
         if hasattr(self, "return_press_time") and self.return_press_time is not None:
@@ -363,7 +372,7 @@ class KeyboardFrame(tk.Frame):
             if press_duration > 3:
                 print("Spacebar held for more than 3 seconds. Scanning backward.")
                 self.scan_backward()
-                time.sleep(1.5)  # Scan backward every 1.5 seconds while held
+                time.sleep(1)# Scan backward every 1 seconds while held
 
             # Small delay to prevent excessive CPU usage
             time.sleep(0.1)
