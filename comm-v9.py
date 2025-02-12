@@ -1,0 +1,1844 @@
+import tkinter as tk
+from pyttsx3 import init
+import threading
+import time
+import subprocess
+import platform
+import pyautogui
+import ctypes  # For Windows-specific focus handling
+from pynput import keyboard
+import win32gui
+import win32process
+import win32con
+import queue
+import json
+import os
+import logging
+import requests
+import win32api
+
+# Function to bring the application to the foreground and monitor focus
+def bring_to_foreground_with_monitoring():
+    """Minimize when Chrome is running and restore focus when Chrome closes."""
+    hwnd = win32gui.FindWindow(None, "Accessible Menu")  # Replace with the exact title
+    if not hwnd:
+        print("Application window not found.")
+        return
+
+    app_minimized = False  # Track the app's state
+
+    while True:
+        try:
+            if is_chrome_running():
+                if not app_minimized:  # Only minimize if not already minimized
+                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                    print("Chrome detected. Application minimized.")
+                    app_minimized = True
+            else:
+                if app_minimized:  # Restore the app if previously minimized
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    time.sleep(0.1)  # Small delay to allow window state update
+                    win32gui.SetForegroundWindow(hwnd)
+                    print("Chrome closed. Application restored to focus.")
+                    app_minimized = False
+
+        except Exception as e:
+            print(f"Error in bring_to_foreground_with_monitoring: {e}")
+        
+        time.sleep(1)  # Adjust monitoring frequency
+
+def monitor_app_focus(app_title="Accessible Menu"):
+    """Continuously monitor Chrome's state and ensure the application is maximized and focused."""
+    while True:
+        try:
+            # Check if Chrome is running
+            if not is_chrome_running():
+                print("Chrome is not running. Ensuring application is maximized and in focus.")
+                
+                hwnd = win32gui.FindWindow(None, app_title)
+                if hwnd:
+                    # Restore and maximize the application window
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # Ensure it's not minimized
+                    win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)  # Maximize the window
+                    win32gui.SetForegroundWindow(hwnd)  # Bring it to the foreground
+                    print("Application is maximized and in focus.")
+                else:
+                    print(f"Application window with title '{app_title}' not found.")
+            else:
+                print("Chrome is running. Application can remain minimized or in the background.")
+        except Exception as e:
+            print(f"Error in monitor_app_focus: {e}")
+        
+        time.sleep(2)  # Adjust the monitoring frequency as needed
+
+# Configure logging
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Function to minimize the terminal window
+def minimize_terminal():
+    if platform.system() == "Windows":
+        try:
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                print("Terminal minimized.")
+        except Exception as e:
+            print(f"Error minimizing terminal: {e}")
+
+# Function to minimize the app when Chrome is open
+def monitor_and_minimize(app):
+    """Continuously monitor for Chrome activity and minimize the Tkinter app if restored."""
+    while True:
+        try:
+            active_window, _ = get_active_window_name()
+
+            # Check if Chrome is the active window
+            if "Chrome" in active_window or "Google Chrome" in active_window:
+                print("Chrome detected. Minimizing the app.")
+                app.iconify()  # Minimize the Tkinter window
+
+            # Check if the app is restored and Chrome is still open
+            if app.state() == "normal" and ("Chrome" in active_window or "Google Chrome" in active_window):
+                print("App restored while Chrome is open. Minimizing again.")
+                app.iconify()
+
+        except Exception as e:
+            print(f"Error in monitor_and_minimize: {e}")
+        time.sleep(1)  # Adjust frequency of checks if needed
+
+import psutil
+
+def is_chrome_running():
+    """Check if any Chrome process is running."""
+    for process in psutil.process_iter(['name']):
+        if process.info['name'] and 'chrome' in process.info['name'].lower():
+            return True
+    return False
+
+def monitor_and_minimize(app):
+    """Continuously monitor for Chrome activity and minimize the Tkinter app."""
+    while True:
+        try:
+            if is_chrome_running():
+                print("Chrome detected. Minimizing the app.")
+                minimize_with_win32("Accessible Menu")
+            else:
+                print("Chrome not running.")
+        except Exception as e:
+            print(f"Error in monitor_and_minimize: {e}")
+        time.sleep(1)  # Adjust the frequency of checks
+        
+# Function to minimize the on-screen keyboard
+def minimize_on_screen_keyboard():
+    """Minimizes the on-screen keyboard if it's active."""
+    try:
+        retries = 5
+        for attempt in range(retries):
+            hwnd = win32gui.FindWindow("IPTip_Main_Window", None)  # Verify this class name
+            if hwnd:
+                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                print(f"On-screen keyboard minimized on attempt {attempt + 1}.")
+                return
+            time.sleep(1)  # Wait before retrying
+        print("On-screen keyboard not found after retries.")
+    except Exception as e:
+        print(f"Error minimizing on-screen keyboard: {e}")
+
+# Function to Monitor and Close Start Menu
+def send_esc_key():
+    """Send the ESC key to close the Start Menu."""
+    ctypes.windll.user32.keybd_event(0x1B, 0, 0, 0)  # ESC key down
+    ctypes.windll.user32.keybd_event(0x1B, 0, 2, 0)  # ESC key up
+    print("ESC key sent to close Start Menu.")
+
+def is_start_menu_open():
+    """Check if the Start Menu is currently open and focused."""
+    hwnd = win32gui.GetForegroundWindow()  # Get the handle of the active (focused) window
+    class_name = win32gui.GetClassName(hwnd)  # Get the class name of the active window
+    return class_name in ["Shell_TrayWnd", "Windows.UI.Core.CoreWindow"]
+
+def monitor_start_menu():
+    """Continuously check and close the Start Menu if it is open."""
+    while True:
+        try:
+            # Check if the Start Menu is active
+            if is_start_menu_open():
+                print("Start Menu detected. Closing it now.")
+                send_esc_key()
+            else:
+                hwnd = win32gui.GetForegroundWindow()
+                active_window_title = win32gui.GetWindowText(hwnd)
+                print(f"Active window: {active_window_title} (Start Menu not active).")
+        except Exception as e:
+            print(f"Error in monitor_start_menu: {e}")
+        
+        time.sleep(0.5)  # Adjust frequency as needed
+
+# List all available window titles for debugging
+def log_window_titles():
+    def callback(hwnd, results):
+        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd):
+            results.append(win32gui.GetWindowText(hwnd))
+    windows = []
+    win32gui.EnumWindows(callback, windows)
+    print("Available window titles:")
+    for title in windows:
+        print(f"Window title: {title}")
+        
+def log_active_window_title():
+    while True:
+        try:
+            active_window, _ = get_active_window_name()
+            print(f"Active window: {active_window}")
+        except Exception as e:
+            print(f"Error logging window title: {e}")
+        time.sleep(1)        
+
+# Initialize Text-to-Speech
+engine = init()
+speak_queue = queue.Queue()
+
+def speak(text):
+    if speak_queue.qsize() >= 1:
+        with speak_queue.mutex:
+            speak_queue.queue.clear()
+    speak_queue.put(text)
+
+def play_speak_queue():
+    while True:
+        text = speak_queue.get()
+        if text is None:
+            speak_queue.task_done()
+            break
+        engine.say(text)
+        engine.runAndWait()
+        speak_queue.task_done()
+
+speak_thread = threading.Thread(target=play_speak_queue, daemon=True)
+speak_thread.start()
+
+# Function to get the active window title
+def get_active_window_name():
+    hwnd = win32gui.GetForegroundWindow()
+    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+    name = win32gui.GetWindowText(hwnd)
+    return name, pid
+
+# Utility Functions
+def minimize_with_win32(app_title="Accessible Menu"):
+    hwnd = win32gui.FindWindow(None, app_title)
+    if hwnd:
+        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+        print("Forced minimization with win32.")
+    else:
+        print("App window not found for minimization.")
+
+# Function to close Chrome using Alt+F4
+def close_chrome_cleanly():
+    """Close Chrome browser cleanly using Alt+F4."""
+    try:
+        name, _ = get_active_window_name()
+        if "Chrome" in name:
+            print("Chrome is active. Closing it.")
+            pyautogui.hotkey("alt", "f4")  # Close Chrome window
+        else:
+            print("Chrome is not the active window.")
+    except Exception as e:
+        print(f"Error closing Chrome: {e}")
+
+# Function to bring the application back into focus
+def bring_application_to_focus():
+    try:
+        app_hwnd = win32gui.FindWindow(None, "Accessible Menu")  # Replace with your window title
+        if app_hwnd:
+            win32gui.ShowWindow(app_hwnd, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(app_hwnd)
+            print("Application brought to focus.")
+        else:
+            print("No GUI window found.")
+    except Exception as e:
+        print(f"Error focusing application: {e}")
+
+# Determine the absolute path to the "data" subfolder.
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+# Construct the full path to the last_watched.json file.
+LAST_WATCHED_FILE = os.path.join(DATA_DIR, "last_watched.json")
+
+def load_last_watched():
+    if os.path.exists(LAST_WATCHED_FILE):
+        with open(LAST_WATCHED_FILE, "r") as file:
+            return json.load(file)
+    return {}
+
+def save_last_watched(data):
+    # Ensure the data directory exists.
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    with open(LAST_WATCHED_FILE, "w") as file:
+        json.dump(data, file)
+
+import os
+import pandas as pd
+from collections import defaultdict
+
+def load_links(file_path="shows.xlsx"):
+    """
+    Reads links data from an Excel file and organizes it by type and genre.
+    The Excel file should have columns such as:
+      - type
+      - genre
+      - title
+      - url
+    Returns a nested defaultdict structure.
+    """
+    # Construct the absolute file path if needed.
+    abs_path = os.path.join(os.path.dirname(__file__),"data", file_path)
+    
+    try:
+        # Read the Excel file into a DataFrame.
+        df = pd.read_excel(abs_path)
+    except Exception as e:
+        print(f"[ERROR] Failed to read {file_path}: {e}")
+        return {}
+
+    # Convert the DataFrame to a list of dictionaries.
+    links = df.to_dict(orient="records")
+    
+    # Organize the data by type and genre.
+    organized = defaultdict(lambda: defaultdict(list))
+    for entry in links:
+        t = entry.get("type", "misc").lower()
+        genre = entry.get("genre", "misc").lower()
+        organized[t][genre].append(entry)
+        
+    # Sort the entries within each type/genre by title.
+    for t in organized:
+        for genre in organized[t]:
+            organized[t][genre].sort(key=lambda e: e.get("title", ""))
+    
+    return organized
+
+
+class KeySequenceListener:
+    def __init__(self, app):
+        self.app = app
+        self.sequence = ["enter", "enter", "enter"]  # Define the key sequence
+        self.current_index = 0
+        self.last_key_time = None
+        self.timeout = 8 # Timeout for completing the sequence (seconds)
+        self.held_keys = set()  # Track keys that are currently held
+        self.recently_pressed = set()  # To debounce key presses
+        self.start_listener()
+
+    def start_listener(self):
+        def on_press(key):
+            try:
+                key_name = (
+                    key.char.lower() if hasattr(key, 'char') and key.char else str(key).split('.')[-1].lower()
+                )
+                if key_name in self.recently_pressed:  # Ignore key if already recently pressed
+                    return
+
+                self.recently_pressed.add(key_name)
+                self.check_key(key_name)
+            except AttributeError:
+                pass
+
+        def on_release(key):
+            try:
+                key_name = (
+                    key.char.lower() if hasattr(key, 'char') and key.char else str(key).split('.')[-1].lower()
+                )
+                self.recently_pressed.discard(key_name)  # Allow key to be pressed again
+            except AttributeError:
+                pass
+
+        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+        listener.start()
+
+    def check_key(self, key_name):
+        # Handle timeout for the sequence
+        if self.last_key_time and time.time() - self.last_key_time > self.timeout:
+            print("Sequence timeout. Resetting index.")
+            self.current_index = 0  # Reset sequence on timeout
+
+        self.last_key_time = time.time()
+
+        # Check the current key against the sequence
+        if key_name == self.sequence[self.current_index]:
+            print(f"Matched {key_name} at index {self.current_index}")
+            self.current_index += 1  # Move to the next key in the sequence
+            if self.current_index == len(self.sequence):  # Full sequence detected
+                self.handle_sequence()
+                self.current_index = 0  # Reset sequence index
+        else:
+            print(f"Key mismatch or invalid input. Resetting sequence.")
+            self.current_index = 0  # Reset on invalid input
+
+    def handle_sequence(self):
+        print("Key sequence detected. Closing Chrome and focusing application.")
+        threading.Thread(target=self.perform_actions, daemon=True).start()
+
+    def perform_actions(self):
+        close_chrome_cleanly()
+
+        # Introduce a delay before resuming scanning/selecting
+        print("Adding delay before resuming scanning/selecting...")
+        time.sleep(2)  # Delay in seconds; adjust as needed
+
+        bring_application_to_focus()
+        
+# Minimize the terminal window
+def minimize_terminal():
+    if platform.system() == "Windows":
+        try:
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, win32con.SW_MINIMIZE)  # Ensure the console is minimized
+        except Exception as e:
+            print(f"Error minimizing terminal on Windows: {e}")
+            
+  # Minimize the on-screen keyboard
+def minimize_on_screen_keyboard():
+    """Minimizes the on-screen keyboard if it's active."""
+    try:
+        retries = 5
+        for attempt in range(retries):
+            hwnd = win32gui.FindWindow("IPTip_Main_Window", None)  # Verify this class name
+            if hwnd:
+                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                print(f"On-screen keyboard minimized on attempt {attempt + 1}.")
+                return
+            time.sleep(1)  # Wait before retrying
+        print("On-screen keyboard not found after retries.")
+    except Exception as e:
+        print(f"Error minimizing on-screen keyboard: {e}")
+    
+
+import ctypes
+import pyautogui
+from pynput.keyboard import Controller
+
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Accessible Menu")
+        self.geometry("960x540")  # Default, will adjust to screen size
+        self.attributes("-fullscreen", True)
+        self.configure(bg="black")
+        self.current_frame = None
+        self.buttons = []  # Holds buttons for scanning
+        self.current_button_index = 0  # Current scanning index
+        self.selection_enabled = True  # Flag to manage debounce for selection
+        self.keyboard = Controller()  # Initialize the keyboard controller
+        self.organized_links = load_links("shows.xlsx")
+        self.spacebar_pressed = False
+        self.long_spacebar_pressed = False
+        self.start_time = 0
+        self.backward_time_delay = 2  # Delay in seconds when long holding space
+       
+        # Add Close and Minimize buttons
+        self.create_window_controls()
+
+        # Minimize terminal and keyboard
+        minimize_terminal()
+        minimize_on_screen_keyboard()
+        
+        # Start monitoring for Chrome in a separate thread
+        threading.Thread(target=monitor_and_minimize, args=(self,), daemon=True).start()
+
+        # Start monitoring for Chrome's state and application focus
+        threading.Thread(target=monitor_app_focus, args=("Accessible Menu",), daemon=True).start()
+
+        # Start monitoring the Start Menu
+        threading.Thread(target=monitor_start_menu, daemon=True).start()
+
+        # Delay key bindings to ensure focus
+        self.after(3000, self.bind_keys_for_scanning)
+
+        # Focus Application
+        self.after(7000, self.force_focus, bring_application_to_focus())
+        self.after(9000, lambda: pyautogui.click(x=25, y=25))
+
+
+        self.menu_stack = []
+
+        # Initialize the main menu
+        print("Initializing the main menu...")
+        self.show_frame(MainMenuPage)
+
+    def force_focus(self):
+        self.focus_force()
+        self.lift()
+        self.attributes("-topmost", True)
+        self.after(500, lambda: self.attributes("-topmost", False))
+        print("Forced focus via Tkinter methods.")
+
+    def create_window_controls(self):
+        """Adds Close and Minimize buttons to the top of the app window."""
+        control_frame = tk.Frame(self, bg="gray")  # Change background color to make it visible
+        control_frame.pack(side="top", fill="x")
+
+        minimize_button = tk.Button(
+            control_frame, text="Minimize", bg="light blue", fg="black",
+            command=self.iconify, font=("Arial", 12)
+        )
+        minimize_button.pack(side="right", padx=5, pady=5)
+
+        close_button = tk.Button(
+            control_frame, text="Close", bg="red", fg="white",
+            command=self.destroy, font=("Arial", 12)
+        )
+        close_button.pack(side="right", padx=5, pady=5)
+
+    def bind_keys_for_scanning(self):
+        # Unbind any previous key events (if needed).
+        self.unbind("<KeyPress-space>")
+        self.unbind("<KeyRelease-space>")
+        self.unbind("<KeyRelease-Return>")
+        
+        # Bind the keys on the main app (or you could bind them to self.current_frame if you prefer).
+        self.bind("<KeyPress-space>", self.track_spacebar_hold)
+        self.bind("<KeyRelease-space>", self.reset_spacebar_hold)
+        self.bind("<KeyRelease-Return>", self.select_button)
+        print("Key bindings activated.")
+
+
+        # Start key sequence listener
+        self.sequencer = KeySequenceListener(self)
+
+        # Start spacebar hold tracking in a separate thread
+        threading.Thread(target=self.monitor_spacebar_hold, daemon=True).start()
+
+    def monitor_spacebar_hold(self):
+        while True:
+            if self.spacebar_pressed and (time.time() - self.start_time >= 3.5):
+                self.long_spacebar_pressed = True
+                self.scan_backward()
+                time.sleep(self.backward_time_delay)
+
+    def track_spacebar_hold(self, event):
+        if not self.spacebar_pressed and not self.long_spacebar_pressed:
+            self.spacebar_pressed = True
+            self.start_time = time.time()
+
+    def reset_spacebar_hold(self, event):
+        if self.spacebar_pressed:
+            self.spacebar_pressed = False
+            if not self.long_spacebar_pressed:
+                self.scan_forward()
+            else:
+                self.long_spacebar_pressed = False
+                self.start_time = time.time()
+
+    def show_frame(self, frame_factory):
+        if self.current_frame:
+            # Save the function (or lambda) that creates the current frame.
+            self.menu_stack.append(self.current_frame_factory)
+            self.current_frame.destroy()
+        self.current_frame = frame_factory(self)
+        self.current_frame.pack(expand=True, fill="both")
+        self.current_frame_factory = frame_factory  # Save the factory for this frame
+        self.buttons = self.current_frame.buttons
+        self.current_button_index = 0
+        if self.buttons:
+            self.highlight_button(0)
+
+    def show_previous_menu(self):
+        if self.menu_stack:
+            self.current_frame.destroy()
+            previous_factory = self.menu_stack.pop()
+            self.current_frame = previous_factory(self)
+            self.current_frame.pack(expand=True, fill="both")
+            self.current_frame_factory = previous_factory
+            self.buttons = self.current_frame.buttons
+            self.current_button_index = 0
+            if self.buttons:
+                self.highlight_button(0)
+        else:
+            self.show_frame(MainMenuPage)
+
+    def scan_forward(self, event=None):
+        """Advance to the next button and highlight it upon spacebar release."""
+        if not self.selection_enabled or not self.buttons:
+            return
+        self.selection_enabled = False  # Disable selection temporarily
+        
+        self.current_button_index = (self.current_button_index + 1) % len(self.buttons)
+        self.highlight_button(self.current_button_index)
+           
+        # Speak the button's text if the frame matches
+        if isinstance(self.current_frame, (
+            MainMenuPage, EntertainmentMenuPage, SettingsMenuPage,
+            TriviaGamePage, TriviaMenuPage, LibraryMenu, GamesPage
+        )):
+            speak(self.buttons[self.current_button_index]["text"])
+
+        # Re-enable selection after a short delay
+        threading.Timer(0.5, self.enable_selection).start()
+
+    def scan_backward(self, event=None):
+        """Move to the previous button and highlight it."""
+        if not self.selection_enabled or not self.buttons:
+            return
+
+        self.selection_enabled = False  # Disable selection temporarily
+        self.current_button_index = (self.current_button_index - 1) % len(self.buttons)
+        self.highlight_button(self.current_button_index)
+
+        # Speak the button's text if the frame matches
+        if isinstance(self.current_frame, (
+            MainMenuPage, EntertainmentMenuPage,  SettingsMenuPage,
+            TriviaGamePage, TriviaMenuPage, LibraryMenu, GamesPage
+          
+        )):
+            speak(self.buttons[self.current_button_index]["text"])
+
+        # Re-enable selection after a short delay
+        threading.Timer(0.5, self.enable_selection).start()
+
+
+    def enable_selection(self):
+        """Re-enable scanning and selection after the delay."""
+        self.selection_enabled = True
+
+    def select_button(self, event=None):
+        """Select the currently highlighted button upon Enter key release with debounce and delay."""
+        if self.selection_enabled and self.buttons:
+            self.selection_enabled = False  # Disable selection temporarily
+            self.buttons[self.current_button_index].invoke()  # Invoke the button action
+
+            # Add delay for both scanning and selection after Enter key
+            threading.Timer(2, self.enable_selection).start()  # Re-enable selection after 2 seconds
+
+            self.sequencer.current_index = 0
+            self.sequencer.last_key_time = None
+
+    def highlight_button(self, index):
+        for i, btn in enumerate(self.buttons):
+            if i == index:
+                btn.config(bg="yellow", fg="black")
+            else:
+                btn.config(bg="light blue", fg="black")
+        self.update()  # Refresh appearance
+
+        # Auto-scroll so that the highlighted button is visible.
+        if hasattr(self, "scroll_canvas"):
+            try:
+                btn = self.buttons[index]
+                # Get button’s absolute Y position and canvas’s Y position.
+                btn_y = btn.winfo_rooty()
+                canvas_y = self.scroll_canvas.winfo_rooty()
+                canvas_height = self.scroll_canvas.winfo_height()
+                # If the button is not fully in view, adjust the yview.
+                if btn_y < canvas_y or (btn_y + btn.winfo_height()) > (canvas_y + canvas_height):
+                    relative_y = (btn_y - canvas_y) / self.scroll_canvas.bbox("all")[3]
+                    self.scroll_canvas.yview_moveto(relative_y)
+            except Exception as e:
+                print(f"Error auto-scrolling: {e}")
+
+    
+# Base Frame for Menu Pages
+class MenuFrame(tk.Frame):
+    active_show = None  # Class-level variable to track the active show
+
+    def __init__(self, parent, title):
+        super().__init__(parent, bg="black")
+        self.parent = parent
+        self.title = title
+        self.buttons = []  # Store buttons for scanning
+        self.create_title()
+
+    def create_title(self):
+        label = tk.Label(self, text=self.title, font=("Arial", 36), bg="black", fg="white")
+        label.pack(pady=20)
+
+    def create_button_grid(self, buttons, columns=3):
+        # Create a frame for the grid directly inside this MenuFrame.
+        grid_frame = tk.Frame(self, bg="black")
+        grid_frame.pack(expand=True, fill="both", padx=10, pady=10)
+
+        self.buttons = []  # Reset the button list.
+        rows = (len(buttons) + columns - 1) // columns  # Calculate number of rows.
+
+        for i, (text, command, speak_text) in enumerate(buttons):
+            row, col = divmod(i, columns)
+            btn = tk.Button(
+                grid_frame,
+                text=text,
+                font=("Arial Black", 36),
+                bg="light blue",
+                fg="black",
+                activebackground="yellow",
+                activeforeground="black",
+                command=lambda c=command, s=speak_text: self.on_select(c, s),
+                wraplength=700  # Allows text to wrap if needed.
+            )
+            btn.grid(row=row, column=col, sticky="nsew", padx=10, pady=10)
+            self.buttons.append(btn)
+
+        # Configure the grid rows and columns to expand evenly.
+        for r in range(rows):
+            grid_frame.rowconfigure(r, weight=1)
+        for c in range(columns):
+            grid_frame.columnconfigure(c, weight=1)
+
+    def on_select(self, command, speak_text):
+        command()
+        if speak_text:
+            speak(speak_text)
+
+    def open_in_chrome(self, show_name, default_url, persistent=True):
+        if persistent:
+            last_watched = load_last_watched()
+            url_to_open = last_watched.get(show_name, default_url)
+        else:
+            url_to_open = default_url
+        try:
+            subprocess.run(
+                ["start", "chrome", "--remote-debugging-port=9222", "--start-fullscreen", url_to_open],
+                shell=True
+            )
+            print(f"Opened URL for {show_name}: {url_to_open}")
+        except Exception as e:
+            print(f"Error opening URL: {e}")
+            return
+
+        # Only start the tracking thread if persistence is enabled.
+        if persistent:
+            MenuFrame.active_show = show_name
+            threading.Thread(target=self.save_current_url, args=(show_name, default_url), daemon=True).start()
+
+    def movies_in_chrome(self, show_name, default_url):
+        """
+        Opens the given movie URL in Chrome in fullscreen mode without
+        using persistent last-watched data.
+        """
+        try:
+            subprocess.run(
+                ["start", "chrome", "--remote-debugging-port=9222", "--start-fullscreen", default_url],
+                shell=True
+            )
+            print(f"Opened movie URL for {show_name}: {default_url}")
+        except Exception as e:
+            print(f"Error opening movie URL for {show_name}: {e}")
+
+    import requests
+
+    def get_active_chrome_url(self):
+        """Retrieve the active URL from Chrome using the DevTools Protocol."""
+        try:
+            response = requests.get("http://localhost:9222/json")
+            tabs = response.json()
+
+            for tab in tabs:
+                if tab.get("type") == "page" and tab.get("url") and tab.get("url").startswith("http"):
+                    return tab["url"]  # Return the active or first valid tab's URL
+
+            logging.error("No valid active Chrome tab found.")
+        except requests.exceptions.ConnectionError as e:
+            logging.error(f"Failed to connect to Chrome DevTools: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"Error retrieving Chrome URL: {e}")
+            return None
+
+    def save_current_url(self, show_name, expected_url):
+        """Periodically save the currently active Chrome URL for the given show."""
+        print(f"[DEBUG] Started tracking URL for: {show_name}")
+
+        base_url = "/".join(expected_url.split("/")[:4])  # Extract base URL
+
+        while MenuFrame.active_show == show_name:  # ✅ Only track if this is the active show
+            time.sleep(5)  # Check every 5 seconds
+
+            current_url = self.get_active_chrome_url()
+            print(f"[DEBUG] Current URL fetched: {current_url}")
+
+            if current_url and current_url.startswith(base_url):
+                last_watched = load_last_watched()
+                last_watched[show_name] = current_url  # ✅ Save dynamically updated URL
+                save_last_watched(last_watched)
+                print(f"[DEBUG] Updated last-watched URL for {show_name}: {current_url}")
+            else:
+                print(f"[DEBUG] No matching URL found for {show_name}. Current URL: {current_url}")
+
+            if not self.is_chrome_running():  # Stop tracking if Chrome is closed
+                print(f"[DEBUG] Chrome is no longer running. Stopping updates for {show_name}.")
+                break
+
+        print(f"[DEBUG] Stopped tracking URL for: {show_name}")
+
+    def is_chrome_running(self):
+        """Check if Chrome is still running."""
+        import psutil
+        for process in psutil.process_iter(['name']):
+            if process.info['name'] and 'chrome' in process.info['name'].lower():
+                return True
+        return False
+    
+    def open_and_click(self, show_name, default_url, x_offset=0, y_offset=0):
+        """Open the given URL, click on the specified position, and ensure fullscreen mode."""
+        # Use the same logic as open_in_chrome to open the URL
+        self.movies_in_chrome(show_name, default_url)
+        time.sleep(5)  # Wait for the browser to open and load
+
+        # Bring the browser window to the foreground
+        hwnd = win32gui.GetForegroundWindow()
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(hwnd)
+        print("Brought Chrome to the foreground.")
+
+        # Calculate click position with offsets
+        screen_width, screen_height = pyautogui.size()
+        click_x = (screen_width // 2) + x_offset
+        click_y = (screen_height // 2) + y_offset
+
+        # Perform the click
+        pyautogui.click(click_x, click_y)
+        print(f"Clicked at position: ({click_x}, {click_y})")
+
+        # Allow time for interaction
+        time.sleep(2)
+
+    from pynput.keyboard import Controller
+    import keyboard
+
+    def open_pluto(self, show_name, pluto_url):
+        """Open Pluto TV link in Chrome, ensure focus, unmute, and fullscreen."""
+        
+        # Open the URL in Chrome
+        self.open_in_chrome(show_name, pluto_url)
+        time.sleep(7)  # Wait for page and video player to load
+
+        # Bring Chrome to the foreground
+        hwnd = win32gui.GetForegroundWindow()
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(hwnd)
+        print("Brought Chrome to the foreground.")
+
+        # Wait for the video player to load
+        time.sleep(6)
+
+        # Use pynput.Controller instead of keyboard module
+        keyboard = Controller()
+
+        # Simulate 'm' keypress to mute/unmute
+        print("Sending 'm' keypress to unmute the video...")
+        keyboard.press('m')
+        time.sleep(0.1)
+        keyboard.release('m')
+
+        # Wait briefly before fullscreening
+        time.sleep(2)
+
+        # Simulate 'f' keypress to fullscreen
+        print("Sending 'f' keypress to fullscreen the video...")
+        keyboard.press('f')
+        time.sleep(0.1)
+        keyboard.release('f')
+
+        print("Pluto.TV interaction complete.")
+
+    def click_at(self, x, y, hold_time=0.1, double_click=False):
+
+        # Move the cursor to the given coordinates.
+        win32api.SetCursorPos((x, y))
+        time.sleep(0.1)  # Give the cursor time to move.
+        
+        # Perform the first click.
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
+        time.sleep(hold_time)  # Hold the click.
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
+        
+        if double_click:
+            time.sleep(0.1)  # Short delay between clicks.
+            # Perform the second click.
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
+            time.sleep(hold_time)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
+
+    import os
+    import time
+    import subprocess
+    import pyautogui
+    from pyautogui import ImageNotFoundException
+    import win32gui, win32con
+
+    def open_spotify(self, playlist_url):
+        """
+        Opens the Spotify playlist URL in Chrome, waits for the page to load,
+        then tries to locate the Play button via image recognition.
+        If the image is not found on the first try, waits a few seconds and tries again.
+        If still not found, it falls back to predetermined coordinates.
+        Finally, it sends Alt+S to shuffle.
+        """
+        # Define the path to Chrome.
+        chrome_path = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        if not os.path.exists(chrome_path):
+            os.startfile(playlist_url)
+        else:
+            args = [
+                chrome_path,
+                "--autoplay-policy=no-user-gesture-required",
+                "--start-fullscreen",
+                playlist_url
+            ]
+            subprocess.Popen(args)
+        
+        # Wait for the page to load.
+        print("[DEBUG] Waiting for Chrome/Spotify page to load...")
+        time.sleep(12)
+        
+        # Define the absolute path to your reference image.
+        play_image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"images" "spotifyplay.png")
+        if not os.path.exists(play_image_path):
+            print(f"[DEBUG] Reference image not found: {play_image_path}")
+            location = None
+        else:
+            print(f"[DEBUG] Searching for play button using image: {play_image_path}")
+            try:
+                location = pyautogui.locateCenterOnScreen(play_image_path, confidence=0.8)
+            except Exception as e:
+                print(f"[ERROR] Exception during first image search: {e}")
+                location = None
+        
+        # If not found, try to bring Chrome to the foreground and try again.
+        if location is None:
+            print("[DEBUG] Play button not found. Attempting to bring Chrome to foreground and waiting a bit...")
+            # Attempt to find a window with "Chrome" in its title.
+            chrome_hwnd = win32gui.FindWindow(None, "Spotify")  # Adjust this if needed.
+            if chrome_hwnd:
+                win32gui.ShowWindow(chrome_hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(chrome_hwnd)
+            else:
+                print("[DEBUG] Could not find a Chrome window titled 'Spotify'.")
+            time.sleep(3)
+            try:
+                location = pyautogui.locateCenterOnScreen(play_image_path, confidence=0.8)
+            except Exception as e:
+                print(f"[ERROR] Exception during second image search: {e}")
+                location = None
+
+        # If the play button is found, click it; otherwise, use fallback coordinates.
+        if location is not None:
+            print(f"[DEBUG] Play button found at: {location}")
+            pyautogui.click(location)
+        else:
+            print("[DEBUG] Play button still not found. Using fallback coordinates (75, 785).")
+            pyautogui.click((752, 665))
+        
+        # Wait before sending the hotkey.
+        time.sleep(2)
+        pyautogui.hotkey('alt', 's')
+        print("[DEBUG] Sent Alt+S to shuffle.")
+
+
+    def open_plex_movies(self, plex_url, show_name):
+        """
+        Opens the Plex URL in Chrome and then sends keyboard commands:
+        1. Press 'x'
+        2. Press 'return'
+        3. Wait 2 seconds
+        4. Press 'p'
+        """
+        # Open Plex using your common method.
+        self.movies_in_chrome(show_name, plex_url)
+        
+        # Wait for the Plex page to load fully.
+        time.sleep(7)  # Adjust as necessary for your system.
+        
+        # Send the keyboard commands.
+        pyautogui.press('x')
+        time.sleep(2)
+        pyautogui.press('enter')
+        time.sleep(2)
+        pyautogui.press('p')
+        print("Sent keys: x, enter, then after 2 seconds, p.")
+
+    def open_plex(self, plex_url, show_name):
+        """
+        Opens the Plex URL in Chrome and then sends keyboard commands:
+        1. Press 'x'
+        2. Press 'return'
+        3. Wait 2 seconds
+        4. Press 'p'
+        """
+        # Open Plex using your common method.
+        self.open_in_chrome(show_name, plex_url)
+        
+        # Wait for the Plex page to load fully.
+        time.sleep(7)  # Adjust as necessary for your system.
+        
+        # Send the keyboard commands.
+        pyautogui.press('x')
+        time.sleep(2)
+        pyautogui.press('enter')
+        time.sleep(2)
+        pyautogui.press('p')
+        print("Sent keys: x, enter, then after 2 seconds, p.")
+
+    def open_youtube(self, youtube_url, show_name):
+
+        # Open youtube using your common method.
+        self.movies_in_chrome(show_name, youtube_url)
+        
+        # Wait for the Youtube page to load fully.
+        time.sleep(7)  # Adjust as necessary for your system.
+        
+        # Send the keyboard commands.
+        pyautogui.press('f')
+        print("Sent f.")
+
+    def open_link(self, entry):
+        url = entry["url"]
+        title = entry["title"]
+        content_type = entry.get("type", "movies").lower()  # Default to movies if not given
+
+        print(f"[DEBUG] Requested: {title} - URL: {url} (Type: {content_type})")
+
+        # ✅ Always check last_watched.json first for shows
+        if content_type in ["shows"]:
+            last_watched = load_last_watched()
+            if title in last_watched:
+                print(f"[DEBUG] Last-watched found for {title}: {last_watched[title]}")
+                url = last_watched[title]  # Override with last-watched episode
+            else:
+                print(f"[DEBUG] No last-watched found for {title}. Using shows.xlsx default.")
+
+            print(f"[DEBUG] Final URL being used for {title}: {url}")
+
+            # ✅ Apply platform-specific opening logic
+            if "plex.tv" in url:
+                print(f"[DEBUG] Detected Plex Show. Using open_plex() for {title}")
+                self.open_plex(url, title)  # Plex-specific method
+
+            elif "youtube.com" in url or "youtu.be" in url:  # 🔥 Ensure ALL YouTube links use open_youtube()
+                print(f"[DEBUG] Detected YouTube link. Using open_youtube() for {title}.")
+                self.open_youtube(url, title)  # ✅ Always use open_youtube()
+
+            elif "paramountplus.com/live-tv" in url:
+                print(f"[DEBUG] Detected Paramount+ Live TV. Using open_and_click() for {title}.")
+                self.open_and_click(title, url)
+
+            elif "pluto.tv" in url:
+                print(f"[DEBUG] Detected Pluto TV Show. Using open_pluto() for {title}.")
+                self.open_pluto(title, url)  # 🔥 FIXED ARGUMENT ORDER
+
+            else:
+                print(f"[DEBUG] Non-Plex Show. Using open_in_chrome() for {title}")
+                self.open_in_chrome(title, url)  # Default for other platforms
+
+            # ✅ Start tracking changes to `last_watched.json`
+            MenuFrame.active_show = title
+            threading.Thread(target=self.save_current_url, args=(title, url), daemon=True).start()
+
+        # ✅ Live TV handling
+        elif content_type == "live":
+            if "paramountplus.com/live-tv" in url:
+                print(f"[DEBUG] Detected Paramount+ Live TV. Using open_and_click() for {title}.")
+                self.open_and_click(title, url)
+
+            elif "pluto.tv" in url:
+                print(f"[DEBUG] Detected Pluto TV Live Stream. Using open_pluto() for {title}.")
+                self.open_pluto(title, url)  # 🔥 FIXED ARGUMENT ORDER
+
+            elif "youtube.com" in url or "youtu.be" in url:  # 🔥 FIX: Ensure YouTube Live uses open_youtube()
+                print(f"[DEBUG] Detected YouTube Live Stream. Using open_youtube() for {title}.")
+                self.open_youtube(url, title)  # ✅ Always use open_youtube()
+
+            else:
+                print(f"[DEBUG] Detected General Live Content. Using open_in_chrome() for {title}")
+                self.open_in_chrome(title, url)  # Default method for other live content
+
+        # ✅ Movies and other non-show content
+        elif content_type == "movies":
+            if "plex.tv" in url:
+                print(f"[DEBUG] Detected Plex Movie. Using open_plex_movies() for {title}")
+                self.open_plex_movies(url, title)  # Plex-specific opening for movies
+            else:
+                print(f"[DEBUG] Detected Other Movie Content. Using movies_in_chrome() for {title}")
+                self.movies_in_chrome(title, url)  # General method for movies
+
+        # ✅ Music Handling
+        elif content_type == "music":
+            if "spotify.com" in url:
+                print(f"[DEBUG] Detected Spotify URL. Using open_spotify() for {title}")
+                self.open_spotify(url)
+            else:
+                print(f"[DEBUG] Detected Other Music Source. Using open_in_chrome() for {title}")
+                self.open_in_chrome(title, url)  # Default for other music services
+
+        # ✅ Audiobooks Handling
+        elif content_type == "audiobooks":
+            if "plex.tv" in url:
+                print(f"[DEBUG] Detected Plex Movie. Using open_plex_movies() for {title}")
+                self.open_plex_movies(url, title)  # Plex-specific opening for movies
+            else:
+                print(f"[DEBUG] Detected Other Movie Content. Using movies_in_chrome() for {title}")
+                self.movies_in_chrome(title, url)  # General method for movies
+
+        # ✅ Default case (failsafe)
+        else:
+            print(f"[DEBUG] Unknown content type '{content_type}'. Defaulting to movies_in_chrome().")
+            self.movies_in_chrome(title, url)  # Default fallback
+
+import sys
+
+# Define Menu Classes
+class MainMenuPage(MenuFrame):
+    def __init__(self, parent):
+        super().__init__(parent, "Main Menu")
+        self.buttons = []  # Store buttons for scanning
+        self.current_button_index = 0  # Initialize scanning index
+        self.selection_enabled = True  # Flag to manage debounce for selection
+
+        # Create the grid layout for 4 large buttons
+        grid_frame = tk.Frame(self, bg="black")
+        grid_frame.pack(expand=True, fill="both")
+
+        # Define buttons with their commands and labels
+        buttons = [
+            ("Emergency", self.emergency_alert, "Emergency Alert"),
+            ("Settings", lambda: parent.show_frame(SettingsMenuPage), "Settings Menu"),
+            ("Keyboard", self.open_keyboard_app, "Keyboard"),
+            ("Entertainment", lambda: parent.show_frame(EntertainmentMenuPage), "Entertainment Menu"),
+        ]
+
+        for i, (text, command, speak_text) in enumerate(buttons):
+            row, col = divmod(i, 2)  # Calculate row and column for 2x2 layout
+            btn = tk.Button(
+                grid_frame,
+                text=text,
+                font=("Arial Black", 36),
+                bg="light blue",
+                fg="black",
+                activebackground="yellow",
+                activeforeground="black",
+                command=lambda c=command, s=speak_text: self.on_select(c, s),
+                wraplength=850,  # Wrap text for better display
+            )
+            btn.grid(row=row, column=col, sticky="nsew", padx=10, pady=10)  # Adjust padding for spacing
+            self.buttons.append(btn)  # Add button to scanning list
+
+        # Configure grid to distribute space equally
+        for i in range(2):  # Two rows
+            grid_frame.rowconfigure(i, weight=1)
+        for j in range(2):  # Two columns
+            grid_frame.columnconfigure(j, weight=1)
+
+        # Highlight the first button for scanning
+        if self.buttons:
+            self.highlight_button(0)
+
+    def open_keyboard_app(self):
+        """Closes the current app and opens the KeyboardFrameApp."""
+        try:
+            # Get the path to the `keyboard_frame_app` script
+            script_name = "keyboard.py"  # Ensure the file is in the same directory
+            script_path = os.path.join(os.path.dirname(__file__), "keyboard", script_name)
+
+            # Open the keyboard app
+            subprocess.Popen([sys.executable, script_path])
+
+            # Close the current app
+            self.master.destroy()
+        except Exception as e:
+            print(f"Failed to open keyboard application: {e}")
+
+    def scan_forward(self, event=None):
+        """Move to the next button and highlight it."""
+        if self.selection_enabled and self.buttons:
+            self.selection_enabled = False  # Disable selection temporarily to debounce
+            self.current_button_index = (self.current_button_index + 1) % len(self.buttons)
+            self.highlight_button(self.current_button_index)
+            threading.Timer(0.5, self.enable_selection).start()  # Re-enable selection after a delay
+
+    def highlight_button(self, index):
+        """Highlight the current button and reset others."""
+        for i, button in enumerate(self.buttons):
+            if i == index:
+                button.config(bg="yellow", fg="black")  # Highlight current button
+            else:
+                button.config(bg="light blue", fg="black")  # Reset others
+        self.update()
+
+    def enable_selection(self):
+        """Re-enable selection after a delay."""
+        self.selection_enabled = True
+
+    def on_select(self, command, speak_text):
+        """Handle button selection logic."""
+        command()
+        if speak_text:
+            speak(speak_text)
+
+    def emergency_alert(self):
+        """Trigger emergency alert."""
+        ctypes.windll.user32.keybd_event(0xAF, 0, 0, 0)  # Volume up key
+        for _ in range(50):  # Max volume
+            ctypes.windll.user32.keybd_event(0xAF, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(0xAF, 0, 2, 0)
+            time.sleep(0.05)
+
+        def alert_loop():
+            end_time = time.time() + 15
+            while time.time() < end_time:
+                speak("Help, help, help, help, help")
+                time.sleep(2)
+
+        threading.Thread(target=alert_loop, daemon=True).start()
+
+import subprocess
+import pyautogui
+import time
+import win32gui
+import win32con
+
+class SettingsMenuPage(MenuFrame):
+    def __init__(self, parent):
+        super().__init__(parent, "Settings")  # Set the title to "Settings"
+        self.buttons = []  # Store buttons for scanning
+
+        # Define buttons with actions and TTS
+        buttons = [
+            ("Back", lambda: parent.show_frame(MainMenuPage), "Back"),
+            ("Volume Up", self.volume_up, "Increase volume"),
+            ("Volume Down", self.volume_down, "Decrease volume"),
+            ("Sleep Timer (60 min)", self.sleep_timer, "Set a 60-minute sleep timer"),
+            ("Cancel Sleep Timer", self.cancel_sleep_timer, "Cancel the sleep timer"),
+            ("Turn Display Off", self.turn_off_display, "Turn off the display"),
+            ("Lock", self.lock_computer, "Lock the computer"),
+            ("Restart", self.restart_computer, "Restart the computer"),
+            ("Shut Down", self.shut_down_computer, "Shut down the computer"),         
+        ]
+        
+        # Create button grid and bind keys for scanning/selecting
+        self.create_button_grid(buttons, columns=3)  # Set columns to 3
+        
+    def create_button_grid(self, buttons, columns=5):
+        """Creates a grid layout for buttons with a dynamic number of rows and columns."""
+        grid_frame = tk.Frame(self, bg="black")
+        grid_frame.pack(expand=True, fill="both")
+
+        rows = (len(buttons) + columns - 1) // columns  # Calculate required rows
+        for i, (text, command, speak_text) in enumerate(buttons):
+            row, col = divmod(i, columns)
+            btn = tk.Button(
+                grid_frame, text=text, font=("Arial Black", 36), bg="light blue", fg="black",
+                activebackground="yellow", activeforeground="black",
+                command=lambda c=command, s=speak_text: self.on_select(c, s)
+            )
+            btn.grid(row=row, column=col, sticky="nsew", padx=10, pady=10)
+            self.buttons.append(btn)  # Add button to scanning list
+
+        for i in range(rows):
+            grid_frame.rowconfigure(i, weight=1)
+        for j in range(columns):
+            grid_frame.columnconfigure(j, weight=1)
+
+        self.bind("<KeyPress-space>", self.parent.track_spacebar_hold)
+        self.bind("<KeyRelease-space>", self.parent.reset_spacebar_hold)
+        self.bind("<KeyRelease-Return>", self.parent.select_button)
+        
+    def volume_up(self):
+        """Increase system volume."""
+        for _ in range(4):  # Increase volume by ~10%
+            ctypes.windll.user32.keybd_event(0xAF, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(0xAF, 0, 2, 0)
+            time.sleep(0.05)
+        speak("Volume increased")
+
+    def volume_down(self):
+        """Decrease system volume."""
+        for _ in range(4):  # Decrease volume by ~10%
+            ctypes.windll.user32.keybd_event(0xAE, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(0xAE, 0, 2, 0)
+            time.sleep(0.05)
+        speak("Volume decreased")
+                  
+    def turn_off_display(self):
+        try:
+            ctypes.windll.user32.SendMessageW(0xFFFF, 0x112, 0xF170, 2)  # Turn off display
+            speak("Display turned off")
+        except Exception as e:
+            speak("Failed to turn off display")
+            print(f"Turn Off Display Error: {e}")
+
+    def sleep_timer(self):
+        """Set a 60-minute sleep timer."""
+        try:
+            # Set a sleep timer for 3600 seconds (60 minutes)
+            subprocess.run("shutdown /s /t 3600", shell=True)
+            speak("Sleep timer set for 60 minutes")
+        except Exception as e:
+            speak("Failed to set sleep timer")
+            print(f"Error setting sleep timer: {e}")
+
+    def cancel_sleep_timer(self):
+        """Cancel the sleep timer."""
+        try:
+            # Cancel the shutdown timer
+            subprocess.run("shutdown /a", shell=True)
+            speak("Sleep timer canceled")
+        except Exception as e:
+            speak("Failed to cancel sleep timer")
+            print(f"Error canceling sleep timer: {e}")
+
+    def lock_computer(self):
+        """Lock the computer."""
+        ctypes.windll.user32.LockWorkStation()
+        speak("Computer locked")
+
+    def restart_computer(self):
+        """Restart the computer."""
+        subprocess.run("shutdown /r /t 0")
+        speak("Restarting computer")
+                        
+    def shut_down_computer(self):
+        """Shut down the computer."""
+        subprocess.run("shutdown /s /t 0")
+        speak("Shutting down the computer")
+
+class EntertainmentMenuPage(MenuFrame):
+    def __init__(self, parent):
+        super().__init__(parent, "Entertainment")
+        self.buttons = []
+        self.current_button_index = 0
+        self.selection_enabled = True
+        buttons = [
+            ("Back", lambda: parent.show_frame(MainMenuPage), "Back to Main Menu"),
+            ("Movies", lambda: self.parent.show_frame(lambda p: LibraryMenu(p, self.parent.organized_links.get("movies", {}), "genre", parent_key="movies")), "Movies"),
+            ("Shows", lambda: self.parent.show_frame(lambda p: LibraryMenu(p, self.parent.organized_links.get("shows", {}), "genre", parent_key="shows")), "Shows"),
+            ("Music", lambda: self.parent.show_frame(lambda p: LibraryMenu(p, self.parent.organized_links.get("music", {}), "genre", parent_key="music")), "Music"),
+            ("Audio Books", lambda: self.parent.show_frame(lambda p: LibraryMenu(p, self.parent.organized_links.get("audiobooks", {}), "genre", parent_key="audiobooks")), "Audio Books"),
+            ("Live Streams", lambda: self.parent.show_frame(lambda p: LibraryMenu(p, self.parent.organized_links.get("live", {}), "genre", parent_key="live")), "Live Streams"),
+            ("Games", lambda: parent.show_frame(GamesPage), "Games"),
+            ("Trivia", lambda: parent.show_frame(TriviaMenuPage), "Trivia Game")
+        ]
+        self.create_button_grid(buttons, columns=2)
+
+    def create_button_grid(self, buttons, columns=5):
+        """Creates a grid layout for buttons with a dynamic number of rows and columns."""
+        grid_frame = tk.Frame(self, bg="black")
+        grid_frame.pack(expand=True, fill="both")
+
+        rows = (len(buttons) + columns - 1) // columns  # Calculate required rows
+        for i, (text, command, speak_text) in enumerate(buttons):
+            row, col = divmod(i, columns)
+            btn = tk.Button(
+                grid_frame, text=text, font=("Arial Black", 36), bg="light blue", fg="black",
+                activebackground="yellow", activeforeground="black",
+                command=lambda c=command, s=speak_text: self.on_select(c, s)
+            )
+            btn.grid(row=row, column=col, sticky="nsew", padx=10, pady=10)
+            self.buttons.append(btn)  # Add button to scanning list
+
+        for i in range(rows):
+            grid_frame.rowconfigure(i, weight=1)
+        for j in range(columns):
+            grid_frame.columnconfigure(j, weight=1)
+
+    def on_select(self, command, speak_text):
+        """Handle button selection with scanning."""
+        command()
+        if speak_text:
+            speak(speak_text)
+
+    def coming_soon(self):
+        """Notify that this feature is coming soon."""
+        speak("This feature is coming soon")
+
+
+from functools import partial
+
+class GamesPage(MenuFrame):
+    def __init__(self, parent):
+        super().__init__(parent, "Games")
+        # The third element in each tuple will be used as the game title.
+        buttons = [
+            ("Back", lambda: parent.show_frame(EntertainmentMenuPage), "Back"),     
+            ("Concentration", lambda: self.open_game("Concentration"), "Concentration"),
+            ("Tic-Tac-Toe", lambda: self.open_game("tictactoe"), "Tic-Tac-Toe"),
+            ("Game 3", lambda: self.open_game("Game 3"), "Game 3"),
+            ("Game 4", lambda: self.open_game("Game 4"), "Game 4"),
+            ("Game 5", lambda: self.open_game("Game 5"), "Game 5"),
+            ("Game 6", lambda: self.open_game("Game 6"), "Game 6"),
+            ("Game 7", lambda: self.open_game("Game 7"), "Game 7"),
+            ("Game 8", lambda: self.open_game("Game 8"), "Game 8"),
+        ]
+        self.create_button_grid(buttons)
+
+    def create_button_grid(self, buttons, columns=3):
+        """Creates a grid layout for buttons with a dynamic number of rows and columns."""
+        grid_frame = tk.Frame(self, bg="black")
+        grid_frame.pack(expand=True, fill="both")
+
+        self.buttons = []  # Make sure self.buttons exists for scanning, etc.
+        rows = (len(buttons) + columns - 1) // columns  # Calculate required rows
+        for i, (text, command, speak_text) in enumerate(buttons):
+            row, col = divmod(i, columns)
+            btn = tk.Button(
+                grid_frame, text=text, font=("Arial Black", 36), bg="light blue", fg="black",
+                activebackground="yellow", activeforeground="black",
+                command=lambda c=command, s=speak_text: self.on_select(c, s)
+            )
+            btn.grid(row=row, column=col, sticky="nsew", padx=10, pady=10)
+            self.buttons.append(btn)  # Add button to scanning list
+
+        for i in range(rows):
+            grid_frame.rowconfigure(i, weight=1)
+        for j in range(columns):
+            grid_frame.columnconfigure(j, weight=1)    
+    
+    def open_game(self, game_title):
+        """
+        Given a game title (e.g., "Concentration" or "Game 2"), this function 
+        converts it to a script file name (e.g., "concentration.py" or "game2.py") 
+        and opens that script.
+        """
+        # Convert the game title to a file name.
+        # For example, "Concentration" -> "concentration.py"
+        # "Game 2" -> "game2.py"
+        script_name = f"{game_title.lower().replace(' ', '')}.py"
+        # Build the full path to the script:
+        script_path = os.path.join(os.path.dirname(__file__), "games", script_name)
+        try:
+            subprocess.Popen([sys.executable, script_path])
+            # Optionally close the current app (if desired)
+            self.master.destroy()
+        except Exception as e:
+            print(f"Failed to open {game_title}: {e}")
+
+    def coming_soon(self):
+        speak("This game is coming soon.")
+
+
+from collections import defaultdict
+import tkinter as tk
+from tkinter.font import Font
+
+class LibraryMenu(MenuFrame):
+    def __init__(self, parent, data, level, parent_key=None):
+        """
+        data:
+          - For level "genre": a dict mapping genre → list of entries.
+          - For level "final": a list of entries (each with a "title" key).
+        level:
+          - "genre" for the first level (choose a genre)
+          - "final" for the final step (choose a show)
+        parent_key:
+          - For "genre": (optional) a type (e.g. "movies")
+          - For "final": the chosen genre name
+        """
+        self.data = data
+        self.level = level
+        self.parent_key = parent_key
+        self.page = 0            # current page index
+        self.page_size = 7       # show 7 selection buttons per page
+
+        # Set the window title based on the level.
+        if self.level == "genre":
+            title = f"Select Genre{(' (' + parent_key.capitalize() + ')') if parent_key else ''}"
+        elif self.level == "final":
+            title = f"Select Show ({parent_key})"
+        else:
+            title = "Library"
+        super().__init__(parent, title)
+
+        # Use a container frame for our grid.
+        self.container = tk.Frame(self, bg="black")
+        self.container.pack(expand=True, fill="both")
+        self.reload_buttons()
+
+    def adjust_font_size(self, button, max_width=250, min_font_size=18):
+        button.update_idletasks()  # Update widget geometry
+        text = button.cget("text")
+        # Use the persistent font family and weight
+        font_family = "Arial Black"
+        font_size = 32
+
+        while font_size >= min_font_size:
+            test_font = Font(family=font_family, size=font_size)
+            if test_font.measure(text) <= max_width:
+                break
+            font_size -= 2
+
+        # Update the persistent font or create a new one with the same family and desired size.
+        new_font = Font(family=font_family, size=font_size)
+        button.config(font=new_font)
+
+    def adjust_all_buttons(self):
+        """Call adjust_font_size on each button in the current menu."""
+        for btn in self.buttons:
+            self.adjust_font_size(btn, max_width=250, min_font_size=18,)
+
+
+    def reload_buttons(self):
+        # Clear the container.
+        for widget in self.container.winfo_children():
+            widget.destroy()
+
+        button_list = []
+
+        # Determine the Back button command.
+        # If we're not on the first page, the Back button will go to the previous page;
+        # otherwise, it returns to the previous (Entertainment) menu.
+        if self.page > 0:
+            back_command = self.previous_page
+        else:
+            back_command = lambda: self.parent.show_previous_menu()
+
+        back_btn = tk.Button(
+            self.container,
+            text="Back",
+            font=("Arial Black", 36),
+            bg="light blue",
+            fg="black",
+            command=back_command,
+            wraplength=700,  # Allow wrapping into two lines if needed
+            justify="center"
+        )
+        button_list.append(back_btn)
+
+        # Build the keys list based on the current level.
+        if self.level == "genre":
+            keys = sorted(self.data.keys())
+        elif self.level == "final":
+            keys = sorted(entry["title"] for entry in self.data)
+        else:
+            keys = []
+
+        # Determine the slice for the current page.
+        start = self.page * self.page_size
+        end = start + self.page_size
+        page_keys = keys[start:end]
+
+        for key in page_keys:
+            btn = tk.Button(
+                self.container,
+                text=key,
+                font=("Arial Black", 36),
+                bg="light blue",
+                fg="black",
+                command=lambda k=key: self.on_select(k),
+                wraplength=700,  # Allow wrapping to use two lines
+                justify="center"
+            )
+            button_list.append(btn)
+
+        # If there are more keys beyond this page, add a Next button.
+        if end < len(keys):
+            next_btn = tk.Button(
+                self.container,
+                text="Next",
+                font=("Arial Black", 36),
+                bg="light blue",
+                fg="black",
+                command=self.next_page,
+                wraplength=700,
+                justify="center"
+            )
+            button_list.append(next_btn)
+
+        # Arrange all buttons in a grid (using 3 columns).
+        num_cols = 3
+        num_buttons = len(button_list)
+        num_rows = (num_buttons + num_cols - 1) // num_cols
+
+        for idx, btn in enumerate(button_list):
+            row = idx // num_cols
+            col = idx % num_cols
+            btn.grid(row=row, column=col, sticky="nsew", padx=10, pady=10)
+
+        for r in range(num_rows):
+            self.container.grid_rowconfigure(r, weight=1)
+        for c in range(num_cols):
+            self.container.grid_columnconfigure(c, weight=1)
+
+        # Save the new button list for scanning.
+        self.buttons = button_list
+
+        # Update the parent's scanning state (after a short delay to allow the UI to update).
+        self.after(50, self.update_scanning)
+        # After a short delay, adjust the font sizes on all buttons.
+        self.after(100, self.adjust_all_buttons)
+
+    def update_scanning(self):
+        self.parent.buttons = self.buttons
+        self.parent.current_button_index = 0
+        self.parent.highlight_button(0)
+
+    def next_page(self):
+        """Advance to the next page and reload the buttons."""
+        self.page += 1
+        self.reload_buttons()
+
+    def previous_page(self):
+        """Go back one page and reload the buttons (if not on the first page)."""
+        if self.page > 0:
+            self.page -= 1
+            self.reload_buttons()
+        else:
+            self.parent.show_previous_menu()
+
+    def on_select(self, key):
+        """
+        Dispatch the selection based on the current level:
+          - For "genre": directly show a final menu listing all shows in that genre.
+          - For "final": locate the matching entry and open its URL.
+        """
+        if self.level == "genre":
+            # Instead of grouping entries by their first letter, directly show the list of shows.
+            new_data = self.data[key]  # This is a list of entries for the selected genre.
+            self.parent.show_frame(lambda p: LibraryMenu(p, new_data, "final", parent_key=key))
+        elif self.level == "final":
+            # Find the entry with a matching title and open its link.
+            for entry in self.data:
+                if entry["title"] == key:
+                    self.open_link(entry)
+                    break
+
+import os
+import random
+import tkinter as tk
+from tkinter.font import Font
+import pandas as pd
+
+# =============================================================================
+# Helper Functions to Load Trivia Data from Excel
+# =============================================================================
+
+def load_trivia_questions_excel():
+    """
+    Reads trivia questions from an Excel file and returns a dictionary
+    mapping each topic to a list of question dictionaries.
+    
+    The Excel file should have a sheet with the following columns:
+      - Topic
+      - Question
+      - Choice1
+      - Choice2
+      - Choice3
+      - Choice4
+      - Correct
+    """
+    path = os.path.join(os.path.dirname(__file__),"data", "trivia_questions.xlsx")
+    try:
+        df = pd.read_excel(path)
+        trivia_dict = {}
+        # Iterate over each row in the DataFrame.
+        for _, row in df.iterrows():
+            topic = row['Topic']
+            question_data = {
+                "question": row['Question'],
+                "choices": [row['Choice1'], row['Choice2'], row['Choice3'], row['Choice4']],
+                "correct": int(row['Correct'])
+            }
+            trivia_dict.setdefault(topic, []).append(question_data)
+        return trivia_dict
+    except Exception as e:
+        print("Error loading trivia questions from Excel:", e)
+        return {}
+
+# Load the data once at startup.
+TRIVIA_DATA = load_trivia_questions_excel()
+
+def load_trivia_questions(topic):
+    """
+    Returns the list of trivia questions for the given topic.
+    """
+    return TRIVIA_DATA.get(topic, [])
+
+# =============================================================================
+# Trivia Menu Page
+# =============================================================================
+
+class TriviaMenuPage(MenuFrame):
+    def __init__(self, parent):
+        super().__init__(parent, "Trivia Topics")
+        # Get all topics from the Excel data.
+        all_topics = list(TRIVIA_DATA.keys())
+        # Randomly choose 8 topics (or fewer if not enough exist).
+        topics = random.sample(all_topics, 8) if len(all_topics) > 8 else all_topics
+
+        # The Back button routes back to EntertainmentMenuPage.
+        buttons = [("Back", lambda: parent.show_frame(EntertainmentMenuPage), "Back")]
+        for topic in topics:
+            # Use a lambda default argument so that each button passes its own topic.
+            buttons.append((topic, lambda t=topic: parent.show_frame(lambda p: TriviaGamePage(p, t)), topic))
+        self.create_button_grid(buttons, columns=3)
+
+    def create_button_grid(self, buttons, columns=3):
+        grid_frame = tk.Frame(self, bg="black")
+        grid_frame.pack(expand=True, fill="both")
+        rows = (len(buttons) + columns - 1) // columns
+        self.buttons = []
+        for i, (text, command, speak_text) in enumerate(buttons):
+            row, col = divmod(i, columns)
+            btn = tk.Button(
+                grid_frame,
+                text=text,
+                font=("Arial Black", 36),
+                bg="light blue",
+                fg="black",
+                activebackground="yellow",
+                activeforeground="black",
+                command=lambda c=command, s=speak_text: self.on_select(c, s),
+                wraplength=700
+            )
+            btn.grid(row=row, column=col, sticky="nsew", padx=10, pady=10)
+            self.buttons.append(btn)
+        for r in range(rows):
+            grid_frame.rowconfigure(r, weight=1)
+        for c in range(columns):
+            grid_frame.columnconfigure(c, weight=1)
+
+    def on_select(self, command, speak_text):
+        command()
+        speak(speak_text)
+
+# =============================================================================
+# Trivia Game Page
+# =============================================================================
+
+class TriviaGamePage(MenuFrame):
+    def __init__(self, parent, topic):
+        self.topic = topic
+        self.all_questions = load_trivia_questions(topic)
+        if len(self.all_questions) >= 10:
+            self.game_questions = random.sample(self.all_questions, 10)
+        else:
+            self.game_questions = self.all_questions
+        self.current_question_index = 0
+        if self.game_questions:
+            self.current_question = self.game_questions[self.current_question_index]
+        else:
+            self.current_question = {
+                "question": "No questions available",
+                "choices": ["", "", "", ""],
+                "correct": 0
+            }
+        # Call the superclass initializer.
+        super().__init__(parent, f"Trivia: {topic}")
+
+        # Load an image for Trivia.
+        self.photo = tk.PhotoImage(file="images/trivia.png")
+        self.image_label = tk.Label(self, image=self.photo, bg="black")
+        self.image_label.pack(pady=10)
+
+        # Create the question label.
+        self.question_label = tk.Label(self, text="", font=("Arial", 28),
+                                       bg="black", fg="white", wraplength=800)
+        self.question_label.pack(pady=20, fill=tk.X)
+        
+        # Create a frame for the buttons.
+        self.button_frame = tk.Frame(self, bg="black")
+        self.button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+        
+        # Create the Back button.
+        self.back_button = tk.Button(self.button_frame, text="Back",
+                                     font=("Arial", 32), bg="light blue", fg="black",
+                                     command=lambda: parent.show_frame(TriviaMenuPage))
+        self.back_button.pack(side=tk.LEFT, padx=10, expand=True, fill=tk.BOTH)
+        
+        # Create four answer buttons.
+        self.answer_buttons = []
+        for i in range(4):
+            btn = tk.Button(self.button_frame, text="", font=("Arial", 32),
+                            bg="light blue", fg="black",
+                            command=lambda i=i: self.check_answer(i))
+            btn.pack(side=tk.LEFT, padx=10, expand=True, fill=tk.BOTH)
+            self.answer_buttons.append(btn)
+        
+        # Set the buttons list used for scanning.
+        self.buttons = [self.back_button] + self.answer_buttons
+        self.current_button_index = 0
+        self.highlight_button(self.current_button_index)
+        
+        # Speak the title only once.
+        speak(self.title)
+        
+        # Schedule the display of the first question after a short delay.
+        self.after(2000, self.display_question)
+        self.focus_set()
+
+    def adjust_font_size(self, button, max_width=250, min_font_size=12):
+        """
+        Dynamically adjusts the font size of the button text to ensure it fits.
+        """
+        button.update_idletasks()  # Ensure correct widget size.
+        text = button.cget("text")
+        font_family = button.cget("font").split()[0]
+        font_size = 32  # Starting font size.
+        while font_size >= min_font_size:
+            test_font = Font(family=font_family, size=font_size)
+            text_width = test_font.measure(text)
+            if text_width <= max_width:
+                break
+            font_size -= 2
+        button.config(font=(font_family, font_size))
+
+    def display_question(self):
+        q = self.current_question
+        self.question_label.config(text=q['question'])
+        self.after(100, lambda: speak(q['question']))
+
+        # Shuffle the answer choices.
+        pairs = [(choice, i == q['correct']) for i, choice in enumerate(q['choices'])]
+        random.shuffle(pairs)
+        shuffled_choices = [p[0] for p in pairs]
+        self.shuffled_correct = next(i for i, p in enumerate(pairs) if p[1])
+
+        for i, btn in enumerate(self.answer_buttons):
+            if i < len(shuffled_choices):
+                btn.config(text=shuffled_choices[i], state=tk.NORMAL, bg="light blue", fg="black")
+                self.adjust_font_size(btn, max_width=btn.winfo_width())
+            else:
+                btn.config(text="", state=tk.DISABLED)
+
+        self.current_button_index = 0
+        self.highlight_button(self.current_button_index)
+        self.focus_set()
+    
+    def check_answer(self, selected_index):
+        if selected_index == self.shuffled_correct:
+            result_text = "Correct!"
+            self.answer_buttons[selected_index].config(bg="green")
+        else:
+            result_text = "Incorrect!"
+            self.answer_buttons[selected_index].config(bg="red")
+            self.answer_buttons[self.shuffled_correct].config(bg="green")
+        speak(result_text)
+        self.after(2000, self.next_question)
+    
+    def next_question(self):
+        self.current_question_index += 1
+        if self.current_question_index < len(self.game_questions):
+            self.current_question = self.game_questions[self.current_question_index]
+            self.display_question()
+        else:
+            self.question_label.config(text="End of Trivia Game. Press Back to return.")
+            for btn in self.answer_buttons:
+                btn.config(text="", state=tk.DISABLED)
+            self.buttons = [self.back_button]
+            speak("End of Trivia Game. Press Back to return.")
+        # Reset scanning indices.
+        self.current_button_index = 0
+        if hasattr(self.master, "current_button_index"):
+            self.master.current_button_index = 0
+        self.highlight_button(self.current_button_index)
+        self.focus_set()
+    
+    def highlight_button(self, index):
+        for i, btn in enumerate(self.buttons):
+            # Always highlight the Back button (index 0).
+            if i == 0 or i == index:
+                btn.config(bg="yellow", fg="black")
+            else:
+                btn.config(bg="light blue", fg="black")
+
+# Run the App
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
