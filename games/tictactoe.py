@@ -203,29 +203,36 @@ class TicTacToeGame(tk.Tk):
         self.update_game_board_scan_highlight()
 
     def select_cell(self, r, c):
-        # Only allow Ben (X) to select a cell.
-        if self.current_turn != "X":
-            return  # Not Ben's turn; ignore his selection.
+        # In single-player mode, only allow the X player (human) to make a move.
+        if self.game_mode == "single" and self.current_turn != "X":
+            return  # Not allowed in single-player mode.
         if self.board[(r, c)] != "":
             return  # Cell already marked.
+        
+        # Mark the cell with the current turn's symbol.
         self.board[(r, c)] = self.current_turn
-        # Set tile background based on current turn.
+        
+        # Set tile background based on the current turn.
         if self.current_turn == "X":
             tile_color = "red"
         else:
             tile_color = "blue"
         self.buttons[(r, c)].config(text=self.current_turn, fg="black", font=("Arial", 72),
                                     bg=tile_color, activebackground=tile_color)
+        
+        # Check for a win or tie.
         result = self.check_win()
         if result is not None:
             self.game_over_menu(result)
             return
+        
         # Switch turns.
         if self.current_turn == "X":
             self.current_turn = "O"
         else:
             self.current_turn = "X"
-        # In single-player mode, if it's the computer's turn, make the move.
+        
+        # In single-player mode, if it's the computer's turn, schedule its move.
         if self.game_mode == "single" and self.current_turn == "O":
             self.after(1000, self.computer_move)
         else:
