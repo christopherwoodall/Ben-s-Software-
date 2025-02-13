@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 # Define paths for predictive text data
-PREDICTIVE_FILE = "predictive_ngrams.json"
+PREDICTIVE_FILE = os.path.join(os.path.dirname(__file__), "predictive_ngrams.json")
 
 # Global variable to store JSON data (prevents reloading every keystroke)
 predictive_data = {}
