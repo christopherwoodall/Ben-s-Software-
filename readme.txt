@@ -1,3 +1,5 @@
+**there are mant duplicate functions in this software yet to be cleaned**
+
 # Ben's Accessibility Software
 
 ## Overview
