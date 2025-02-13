@@ -17,36 +17,6 @@ import logging
 import requests
 import win32api
 
-# Function to bring the application to the foreground and monitor focus
-def bring_to_foreground_with_monitoring():
-    """Minimize when Chrome is running and restore focus when Chrome closes."""
-    hwnd = win32gui.FindWindow(None, "Accessible Menu")  # Replace with the exact title
-    if not hwnd:
-        print("Application window not found.")
-        return
-
-    app_minimized = False  # Track the app's state
-
-    while True:
-        try:
-            if is_chrome_running():
-                if not app_minimized:  # Only minimize if not already minimized
-                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-                    print("Chrome detected. Application minimized.")
-                    app_minimized = True
-            else:
-                if app_minimized:  # Restore the app if previously minimized
-                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                    time.sleep(0.1)  # Small delay to allow window state update
-                    win32gui.SetForegroundWindow(hwnd)
-                    print("Chrome closed. Application restored to focus.")
-                    app_minimized = False
-
-        except Exception as e:
-            print(f"Error in bring_to_foreground_with_monitoring: {e}")
-        
-        time.sleep(1)  # Adjust monitoring frequency
-
 def monitor_app_focus(app_title="Accessible Menu"):
     """Continuously monitor Chrome's state and ensure the application is maximized and focused."""
     while True:
@@ -114,19 +84,6 @@ def is_chrome_running():
         if process.info['name'] and 'chrome' in process.info['name'].lower():
             return True
     return False
-
-def monitor_and_minimize(app):
-    """Continuously monitor for Chrome activity and minimize the Tkinter app."""
-    while True:
-        try:
-            if is_chrome_running():
-                print("Chrome detected. Minimizing the app.")
-                minimize_with_win32("Accessible Menu")
-            else:
-                print("Chrome not running.")
-        except Exception as e:
-            print(f"Error in monitor_and_minimize: {e}")
-        time.sleep(1)  # Adjust the frequency of checks
         
 # Function to minimize the on-screen keyboard
 def minimize_on_screen_keyboard():
@@ -223,15 +180,6 @@ def get_active_window_name():
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
     name = win32gui.GetWindowText(hwnd)
     return name, pid
-
-# Utility Functions
-def minimize_with_win32(app_title="Accessible Menu"):
-    hwnd = win32gui.FindWindow(None, app_title)
-    if hwnd:
-        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-        print("Forced minimization with win32.")
-    else:
-        print("App window not found for minimization.")
 
 # Function to close Chrome using Alt+F4
 def close_chrome_cleanly():
@@ -387,34 +335,7 @@ class KeySequenceListener:
         time.sleep(2)  # Delay in seconds; adjust as needed
 
         bring_application_to_focus()
-        
-# Minimize the terminal window
-def minimize_terminal():
-    if platform.system() == "Windows":
-        try:
-            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-            if hwnd:
-                ctypes.windll.user32.ShowWindow(hwnd, win32con.SW_MINIMIZE)  # Ensure the console is minimized
-        except Exception as e:
-            print(f"Error minimizing terminal on Windows: {e}")
             
-  # Minimize the on-screen keyboard
-def minimize_on_screen_keyboard():
-    """Minimizes the on-screen keyboard if it's active."""
-    try:
-        retries = 5
-        for attempt in range(retries):
-            hwnd = win32gui.FindWindow("IPTip_Main_Window", None)  # Verify this class name
-            if hwnd:
-                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-                print(f"On-screen keyboard minimized on attempt {attempt + 1}.")
-                return
-            time.sleep(1)  # Wait before retrying
-        print("On-screen keyboard not found after retries.")
-    except Exception as e:
-        print(f"Error minimizing on-screen keyboard: {e}")
-    
-
 import ctypes
 import pyautogui
 from pynput.keyboard import Controller
@@ -763,19 +684,11 @@ class MenuFrame(tk.Frame):
             else:
                 print(f"[DEBUG] No matching URL found for {show_name}. Current URL: {current_url}")
 
-            if not self.is_chrome_running():  # Stop tracking if Chrome is closed
+            if not is_chrome_running():  # Stop tracking if Chrome is closed
                 print(f"[DEBUG] Chrome is no longer running. Stopping updates for {show_name}.")
                 break
 
         print(f"[DEBUG] Stopped tracking URL for: {show_name}")
-
-    def is_chrome_running(self):
-        """Check if Chrome is still running."""
-        import psutil
-        for process in psutil.process_iter(['name']):
-            if process.info['name'] and 'chrome' in process.info['name'].lower():
-                return True
-        return False
     
     def open_and_click(self, show_name, default_url, x_offset=0, y_offset=0):
         """Open the given URL, click on the specified position, and ensure fullscreen mode."""
