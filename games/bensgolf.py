@@ -33,7 +33,7 @@ BORDER_THICKNESS = 50  # Thickness of the outer gray walls
 BASE_BALL_RADIUS = 45
 BASE_HOLE_RADIUS = 45
 FRICTION = 0.9875
-ANGLE_SPEED = 20
+ANGLE_SPEED = 5
 MAX_POWER = 3
 PAUSE_HOLD_TIME = 6000
 
@@ -584,7 +584,7 @@ def menu():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 quit()
-            elif event.type == pygame.KEYDOWN:
+            elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_SPACE:
                     selected_option = 1 - selected_option
                     speak("Play" if selected_option == 0 else "Exit")
@@ -611,7 +611,7 @@ def pause_menu():
     charging = False
     rotating = False
     pause_running = True
-    selected_option = 0
+    selected_option = None  # No option is selected initially
     pause_font = pygame.font.Font(None, 48)
     speak("Paused")
     pygame.event.clear(pygame.KEYDOWN)
@@ -619,23 +619,37 @@ def pause_menu():
     while pause_running:
         virtual_surface.fill(GREEN)
         draw_text("Pause Menu", font, WHITE, WIDTH // 2, HEIGHT // 4)
-        continue_color = RED if selected_option == 0 else WHITE
-        main_menu_color = RED if selected_option == 1 else WHITE
+        # If no option is selected, display default (non-highlighted) text.
+        if selected_option is None:
+            continue_color = WHITE
+            main_menu_color = WHITE
+        else:
+            continue_color = RED if selected_option == 0 else WHITE
+            main_menu_color = RED if selected_option == 1 else WHITE
+
         draw_text("Continue Game", pause_font, continue_color, WIDTH // 2, HEIGHT // 2)
         draw_text("Main Menu", pause_font, main_menu_color, WIDTH // 2, HEIGHT // 2 + 60)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 quit()
-            elif event.type == pygame.KEYDOWN:
+            elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_SPACE:
-                    selected_option = 1 - selected_option
+                    # If no option selected, set it to 0 on first spacebar release.
+                    if selected_option is None:
+                        selected_option = 0
+                    else:
+                        selected_option = 1 - selected_option  # Toggle selection
                     speak("Continue Game" if selected_option == 0 else "Main Menu")
                 elif event.key == pygame.K_RETURN:
-                    if selected_option == 0:
+                    if selected_option is None:
+                        # Do nothing if no option has been selected yet.
+                        pass
+                    elif selected_option == 0:
                         pause_running = False
                     else:
                         pause_running = False
+                        speak("Main menu")
                         reset_game_state()
                         menu()
         scaled_surface = pygame.transform.scale(virtual_surface, screen.get_size())
