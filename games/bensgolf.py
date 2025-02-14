@@ -6,6 +6,7 @@ import subprocess
 import threading
 import ctypes
 import win32gui
+import os
 
 # Initialize pygame and TTS engine
 pygame.init()
@@ -591,8 +592,11 @@ def menu():
                     if selected_option == 0:
                         menu_running = False
                     else:
-                        # Exit: quit this game and open comm-v9.py
-                        subprocess.Popen(["python", "../comm-v9.py"])
+                        # Get the directory of the current file (minigolf game)
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        # Build the absolute path to comm-v9.py in the root folder
+                        comm_v9_path = os.path.join(current_dir, "..", "comm-v9.py")
+                        subprocess.Popen(["python", comm_v9_path])
                         pygame.quit()
                         quit()
 
@@ -765,7 +769,7 @@ while running:
     if can_shoot or rotating:
         aim_x = ball_x + math.cos(math.radians(angle)) * 500
         aim_y = ball_y + math.sin(math.radians(angle)) * 500
-        pygame.draw.line(virtual_surface, RED, (ball_x, ball_y), (aim_x, aim_y), 10)
+        pygame.draw.line(virtual_surface, WHITE, (ball_x, ball_y), (aim_x, aim_y), 25)
     power_color = (0, 255, 0) if power < MAX_POWER * 0.33 else (255, 255, 0) if power < MAX_POWER * 0.66 else (255, 0, 0)
     pygame.draw.rect(virtual_surface, power_color, (WIDTH // 3, HEIGHT - 50, int((WIDTH // 3) * (power / MAX_POWER)), 60))
     pygame.draw.rect(virtual_surface, WHITE, (WIDTH // 3, HEIGHT - 50, WIDTH // 3, 60), 2)
