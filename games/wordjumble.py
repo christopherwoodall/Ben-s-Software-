@@ -74,7 +74,7 @@ class WordJumbleGame(tk.Tk):
         self.level_number = None  # 1 to 5
         self.total_attempts = 0   # Across all words in this session.
         self.total_correct = 0
-        self.level_correct = 0    # Must reach 5 correct words in a level.
+        self.level_correct = 0    # Incremented only on correct answers.
 
         # Used words: ensure uniqueness in a session.
         self.used_words = set()
@@ -155,12 +155,16 @@ class WordJumbleGame(tk.Tk):
 
     # ---------------- Scanning Methods for Pause Menu ----------------
     def update_pause_scan_highlight(self):
-        for idx, btn in enumerate(self.pause_buttons):
-            if idx == self.pause_scan_index:
-                btn.config(bg="white", activebackground="white", fg="black")
-            else:
+        # If no button is selected, set all to default.
+        if self.pause_scan_index is None:
+            for btn in self.pause_buttons:
                 btn.config(bg="darkorange", activebackground="darkorange", fg="black")
-        if self.pause_buttons:
+        else:
+            for idx, btn in enumerate(self.pause_buttons):
+                if idx == self.pause_scan_index:
+                    btn.config(bg="white", activebackground="white", fg="black")
+                else:
+                    btn.config(bg="darkorange", activebackground="darkorange", fg="black")
             text = self.pause_buttons[self.pause_scan_index].cget("text")
             self.tts_speak(text)
 
@@ -283,7 +287,8 @@ class WordJumbleGame(tk.Tk):
         self.pause_just_opened = True
         self.game_frame.pack_forget()
         self.pause_menu_frame.pack(fill="both", expand=True)
-        self.pause_scan_index = None
+        self.pause_scan_index = None  # Reset highlight index
+        self.update_pause_scan_highlight()  # Update to clear any previous highlight
 
     def resume_game(self):
         self.pause_menu_frame.pack_forget()
@@ -297,24 +302,22 @@ class WordJumbleGame(tk.Tk):
 
     def exit_game(self):
         self.destroy()
-        try:
-            subprocess.Popen([sys.executable, "Comm-v9.py"])
-        except Exception as e:
-            print("Failed to launch Comm-v9.py:", e)
+        current_dir = os.path.dirname(__file__)
+        comm_v9_path = os.path.join(current_dir, "..", "comm-v9.py")
+        subprocess.Popen([sys.executable, comm_v9_path])
 
     # ---------------- Remove Letter Option (via Pause Menu) ----------------
     def remove_last_letter_option(self):
-        # Remove the last letter from the current selection and return it to the pool.
+        # Remove the last letter from current_selection and return it to the pool.
         if self.current_selection:
             removed = self.current_selection[-1]
             self.current_selection = self.current_selection[:-1]
             self.answer_label.config(text=self.current_selection)
-            # Create a new letter button with darkorange background.
             btn = tk.Button(self.buttons_frame, text=removed, font=("Arial", 36), bg="darkorange", fg="black")
             btn.pack(side="left", expand=True, fill="both", padx=5, pady=5)
             self.letter_buttons.append(btn)
             self.scanning_index = None
-        # Automatically resume game mode after removal.
+        # Automatically resume game mode.
         self.resume_game()
 
     # ---------------- Main Menu ----------------
@@ -358,7 +361,8 @@ class WordJumbleGame(tk.Tk):
         self.game_frame = tk.Frame(self, bg="black", highlightbackground="darkorange", highlightthickness=50)
         self.sentence_label = tk.Label(self.game_frame, text="", font=("Arial", 36), fg="white", bg="black")
         self.sentence_label.pack(pady=30)
-        self.answer_label = tk.Label(self.game_frame, text="", font=("Arial", 36), fg="white", bg="black")
+        # Make the answer label about 300% larger and bold.
+        self.answer_label = tk.Label(self.game_frame, text="", font=("Arial", 108, "bold"), fg="white", bg="black")
         self.answer_label.pack(pady=30)
         # Level indicator at top right.
         self.level_label = tk.Label(self.game_frame, text="", font=("Arial", 24), fg="white", bg="black")
@@ -457,222 +461,14 @@ class WordJumbleGame(tk.Tk):
                 self.after(1000, lambda: self.start_game(self.current_difficulty))
         else:
             self.tts_speak("Incorrect")
-            self.level_correct = 0  # Reset current level progress.
-            self.after(2000, self.show_level_score)
+            # Do not reset level progress; allow reattempt of the same word.
+            self.after(2000, self.retry_word)
 
-    def show_level_score(self):
-        percentage = (self.total_correct / self.total_attempts * 100) if self.total_attempts > 0 else 0
-        if percentage < 50:
-            color = "red"
-            msg = "Try again"
-        elif percentage < 60:
-            color = "orange"
-            msg = "You can do better"
-        elif percentage < 70:
-            color = "yellow"
-            msg = "Getting better"
-        elif percentage < 80:
-            color = "green"
-            msg = "Pretty good"
-        elif percentage < 90:
-            color = "light blue"
-            msg = "Good job"
-        elif percentage < 100:
-            color = "light purple"
-            msg = "That's really good"
-        else:
-            color = "magenta"
-            msg = "Wow that's perfect!"
-        score_label = tk.Label(self.game_frame, text=f"Score: {percentage:.0f}%", font=("Arial", 48), fg=color, bg="black")
-        score_label.place(relx=0.5, rely=0.5, anchor="center")
-        self.tts_speak(msg)
-        self.after(3000, lambda: (score_label.destroy(), self.reset_level()))
-
-    def reset_level(self):
-        self.level_correct = 0
-        self.start_game(self.current_difficulty)
-
-    def show_final_score(self):
-        percentage = (self.total_correct / self.total_attempts * 100) if self.total_attempts > 0 else 0
-        if percentage < 50:
-            color = "red"
-            msg = "Try again"
-        elif percentage < 60:
-            color = "orange"
-            msg = "You can do better"
-        elif percentage < 70:
-            color = "yellow"
-            msg = "Getting better"
-        elif percentage < 80:
-            color = "green"
-            msg = "Pretty good"
-        elif percentage < 90:
-            color = "light blue"
-            msg = "Good job"
-        elif percentage < 100:
-            color = "light purple"
-            msg = "That's really good"
-        else:
-            color = "magenta"
-            msg = "Wow that's perfect! ★★★"
-        score_label = tk.Label(self.game_frame, text=f"Score: {percentage:.0f}%", font=("Arial", 48), fg=color, bg="black")
-        score_label.place(relx=0.5, rely=0.5, anchor="center")
-        self.tts_speak(msg)
-        self.after(5000, lambda: (score_label.destroy(), self.reset_all_levels(), self.show_main_menu()))
-
-    def reset_all_levels(self):
-        self.level_number = None
-        self.total_attempts = 0
-        self.total_correct = 0
-        self.level_correct = 0
-
-    # ---------------- Pause Menu ----------------
-    def build_pause_menu(self):
-        self.pause_menu_frame = tk.Frame(self, bg="black")
-        pause_label = tk.Label(self.pause_menu_frame, text="Paused", font=("Arial", 48), fg="white", bg="black")
-        pause_label.pack(pady=50)
-        self.pause_buttons = []
-        btn_continue = tk.Button(self.pause_menu_frame, text="Continue", font=("Arial", 36), fg="black", bg="darkorange", command=self.resume_game)
-        btn_continue.pack(pady=20)
-        self.pause_buttons.append(btn_continue)
-        btn_remove = tk.Button(self.pause_menu_frame, text="Remove Letter", font=("Arial", 36), fg="black", bg="darkorange", command=self.remove_last_letter_option)
-        btn_remove.pack(pady=20)
-        self.pause_buttons.append(btn_remove)
-        btn_menu = tk.Button(self.pause_menu_frame, text="Main Menu", font=("Arial", 36), fg="black", bg="darkorange", command=self.return_to_main_menu)
-        btn_menu.pack(pady=20)
-        self.pause_buttons.append(btn_menu)
-        btn_exit = tk.Button(self.pause_menu_frame, text="Exit", font=("Arial", 36), fg="black", bg="darkorange", command=self.exit_game)
-        btn_exit.pack(pady=20)
-        self.pause_buttons.append(btn_exit)
-        self.pause_scan_index = None
-
-    def show_pause_menu(self):
-        self.active_menu = "pause"
-        self.pause_just_opened = True
-        self.game_frame.pack_forget()
-        self.pause_menu_frame.pack(fill="both", expand=True)
-        self.pause_scan_index = None
-
-    def resume_game(self):
-        self.pause_menu_frame.pack_forget()
-        self.active_menu = "game"
-        self.show_game_screen()
-
-    def return_to_main_menu(self):
-        self.pause_menu_frame.pack_forget()
-        self.active_menu = "main"
-        self.show_main_menu()
-
-    def exit_game(self):
-        self.destroy()
-        subprocess.Popen(["python", "comm-v9.py"])
-
-    # ---------------- Remove Letter Option (via Pause Menu) ----------------
-    def remove_last_letter_option(self):
-        # Remove the last letter from current_selection and return it to the pool.
-        if self.current_selection:
-            removed = self.current_selection[-1]
-            self.current_selection = self.current_selection[:-1]
-            self.answer_label.config(text=self.current_selection)
-            btn = tk.Button(self.buttons_frame, text=removed, font=("Arial", 36), bg="darkorange", fg="black")
-            btn.pack(side="left", expand=True, fill="both", padx=5, pady=5)
-            self.letter_buttons.append(btn)
-            self.scanning_index = None
-        # Resume game mode.
-        self.resume_game()
-
-    # ---------------- Main Menu (Spacebar and Return) ----------------
-    def build_main_menu(self):
-        self.main_menu_frame = tk.Frame(self, bg="darkorange")
-        title_label = tk.Label(self.main_menu_frame, text="Ben's Jumble Game", font=("Arial", 48), bg="darkorange", fg="black")
-        title_label.pack(pady=50)
-        self.menu_buttons = []
-        btn_easy = tk.Button(self.main_menu_frame, text="Easy", font=("Arial", 36), bg="darkorange", fg="black",
-                             command=lambda: self.start_game("easy"))
-        btn_easy.pack(pady=20)
-        self.menu_buttons.append(btn_easy)
-        btn_medium = tk.Button(self.main_menu_frame, text="Medium", font=("Arial", 36), bg="darkorange", fg="black",
-                               command=lambda: self.start_game("medium"))
-        btn_medium.pack(pady=20)
-        self.menu_buttons.append(btn_medium)
-        btn_hard = tk.Button(self.main_menu_frame, text="Hard", font=("Arial", 36), bg="darkorange", fg="black",
-                             command=lambda: self.start_game("hard"))
-        btn_hard.pack(pady=20)
-        self.menu_buttons.append(btn_hard)
-        btn_exit = tk.Button(self.main_menu_frame, text="Exit", font=("Arial", 36), bg="darkorange", fg="black",
-                             command=self.exit_game)
-        btn_exit.pack(pady=20)
-        self.menu_buttons.append(btn_exit)
-        self.menu_scan_index = None
-
-    def show_main_menu(self):
-        self.active_menu = "main"
-        self.main_menu_frame.pack(fill="both", expand=True)
-        if hasattr(self, "game_frame"):
-            self.game_frame.pack_forget()
-        if hasattr(self, "pause_menu_frame"):
-            self.pause_menu_frame.pack_forget()
-        self.menu_scan_index = None
-        for btn in self.menu_buttons:
-            btn.config(bg="darkorange", fg="black")
-        self.tts_speak("Ben's Jumble Game.")
-
-    # ---------------- Game Screen ----------------
-    def build_game_screen(self):
-        self.game_frame = tk.Frame(self, bg="black", highlightbackground="darkorange", highlightthickness=50)
-        self.sentence_label = tk.Label(self.game_frame, text="", font=("Arial", 36), fg="white", bg="black")
-        self.sentence_label.pack(pady=30)
-        self.answer_label = tk.Label(self.game_frame, text="", font=("Arial", 36), fg="white", bg="black")
-        self.answer_label.pack(pady=30)
-        # Level indicator at top right.
-        self.level_label = tk.Label(self.game_frame, text="", font=("Arial", 24), fg="white", bg="black")
-        self.level_label.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
-        self.buttons_frame = tk.Frame(self.game_frame, bg="black")
-        self.buttons_frame.pack(side="bottom", fill="x", padx=20, pady=20)
-
-    def start_game(self, difficulty):
-        self.active_menu = "game"
-        self.current_difficulty = difficulty
-        # Initialize level if starting fresh.
-        if self.level_number is None:
-            self.level_number = 1
-            self.total_attempts = 0
-            self.total_correct = 0
-            self.level_correct = 0
-            self.used_words = set()
-
-        # Update level indicator.
-        self.level_label.config(text=f"Level {self.level_number}")
+    def retry_word(self):
+        # Reset the current word attempt (keeping the same word).
         self.current_selection = ""
         self.answer_label.config(text=self.current_selection)
-        self.show_game_screen()
-
-        # Get the letter range for the current level.
-        min_len, max_len = self.level_ranges[difficulty][self.level_number - 1]
-
-        # Filter words by difficulty and letter length.
-        filtered = self.words_data[self.words_data["mode"] == difficulty.lower()]
-        filtered = filtered[filtered["word"].str.len().between(min_len, max_len)]
-        # Exclude words already used.
-        available = filtered[~filtered["word"].isin(self.used_words)]
-        if available.empty:
-            self.used_words = set()
-            available = filtered
-        row = available.sample(n=1).iloc[0]
-        self.used_words.add(row["word"].strip())
-        self.selected_word = row["word"].strip()
-        self.full_sentence = row["sentence"].strip()
-        # For display, replace the target word with underscores.
-        if self.selected_word in self.full_sentence:
-            display_sentence = self.full_sentence.replace(self.selected_word, "_" * len(self.selected_word))
-        else:
-            display_sentence = self.full_sentence
-        self.sentence_label.config(text=display_sentence)
-        # TTS: speak the word then the sentence.
-        self.tts_speak("The word is: " + self.selected_word)
-        tts_sentence = re.sub(r'_+', self.selected_word, self.full_sentence)
-        self.tts_speak(tts_sentence)
-        # Create jumbled letter buttons.
+        # Re-scramble the letters for the same word.
         self.jumbled_letters = list(self.selected_word)
         random.shuffle(self.jumbled_letters)
         self.original_jumbled_letters = self.jumbled_letters.copy()
@@ -685,77 +481,6 @@ class WordJumbleGame(tk.Tk):
             self.letter_buttons.append(btn)
         self.scanning_index = None
 
-    def show_game_screen(self):
-        self.game_frame.pack(fill="both", expand=True)
-        self.main_menu_frame.pack_forget()
-        if hasattr(self, "pause_menu_frame"):
-            self.pause_menu_frame.pack_forget()
-
-    def select_letter(self, index):
-        if not self.letter_buttons or index < 0 or index >= len(self.letter_buttons):
-            return
-        letter = self.letter_buttons[index]["text"]
-        self.current_selection += letter
-        self.answer_label.config(text=self.current_selection)
-        btn = self.letter_buttons.pop(index)
-        btn.destroy()
-        self.scanning_index = None
-        if not self.letter_buttons:
-            self.check_answer()
-
-    def check_answer(self):
-        self.total_attempts += 1
-        if self.current_selection.lower() == self.selected_word.lower():
-            self.total_correct += 1
-            self.level_correct += 1
-            self.tts_speak("Correct")
-            if self.level_correct == 5:
-                if self.level_number == 5:
-                    self.show_final_score()
-                else:
-                    self.tts_speak("Level complete!")
-                    self.level_number += 1
-                    self.level_correct = 0
-                    self.after(2000, lambda: self.start_game(self.current_difficulty))
-            else:
-                self.after(1000, lambda: self.start_game(self.current_difficulty))
-        else:
-            self.tts_speak("Incorrect")
-            self.level_correct = 0
-            self.after(2000, self.show_level_score)
-
-    def show_level_score(self):
-        percentage = (self.total_correct / self.total_attempts * 100) if self.total_attempts > 0 else 0
-        if percentage < 50:
-            color = "red"
-            msg = "Try again"
-        elif percentage < 60:
-            color = "orange"
-            msg = "You can do better"
-        elif percentage < 70:
-            color = "yellow"
-            msg = "Getting better"
-        elif percentage < 80:
-            color = "green"
-            msg = "Pretty good"
-        elif percentage < 90:
-            color = "light blue"
-            msg = "Good job"
-        elif percentage < 100:
-            color = "light purple"
-            msg = "That's really good"
-        else:
-            color = "magenta"
-            msg = "Wow that's perfect!"
-        score_label = tk.Label(self.game_frame, text=f"Score: {percentage:.0f}%", font=("Arial", 48), fg=color, bg="black")
-        score_label.place(relx=0.5, rely=0.5, anchor="center")
-        self.tts_speak(msg)
-        self.after(3000, lambda: (score_label.destroy(), self.reset_level()))
-
-    def reset_level(self):
-        self.level_correct = 0
-        self.start_game(self.current_difficulty)
-
     def show_final_score(self):
         percentage = (self.total_correct / self.total_attempts * 100) if self.total_attempts > 0 else 0
         if percentage < 50:
@@ -829,7 +554,9 @@ class WordJumbleGame(tk.Tk):
 
     def exit_game(self):
         self.destroy()
-        subprocess.Popen(["python", "../comm-v9.py"])
+        current_dir = os.path.dirname(__file__)
+        comm_v9_path = os.path.join(current_dir, "..", "comm-v9.py")
+        subprocess.Popen([sys.executable, comm_v9_path])
 
     # ---------------- Remove Letter Option (via Pause Menu) ----------------
     def remove_last_letter_option(self):
@@ -842,6 +569,7 @@ class WordJumbleGame(tk.Tk):
             btn.pack(side="left", expand=True, fill="both", padx=5, pady=5)
             self.letter_buttons.append(btn)
             self.scanning_index = None
+        # Automatically resume game mode.
         self.resume_game()
 
     # ---------------- Key Event Handlers (Spacebar and Return) ----------------
