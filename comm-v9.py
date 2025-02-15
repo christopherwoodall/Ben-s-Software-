@@ -1274,11 +1274,11 @@ class GamesPage(MenuFrame):
             ("Concentration", lambda: self.open_game("Concentration"), "Concentration"),
             ("Tic-Tac-Toe", lambda: self.open_game("tictactoe"), "Tic-Tac-Toe"),
             ("Mini Golf", lambda: self.open_game("bensgolf"), "Mini Golf"),
-            ("Game 4", lambda: self.open_game("Game 4"), "Game 4"),
-            ("Game 5", lambda: self.open_game("Game 5"), "Game 5"),
-            ("Game 6", lambda: self.open_game("Game 6"), "Game 6"),
-            ("Game 7", lambda: self.open_game("Game 7"), "Game 7"),
-            ("Game 8", lambda: self.open_game("Game 8"), "Game 8"),
+            ("Word Jumble", lambda: self.open_game("wordjumble"), "Word Jumble"),
+            ("Game 5", lambda: self.coming_soon("Game 5"), "Game 5"),
+            ("Game 6", lambda: self.coming_soon("Game 6"), "Game 6"),
+            ("Game 7", lambda: self.coming_soon("Game 7"), "Game 7"),
+            ("Game 8", lambda: self.coming_soon("Game 8"), "Game 8"),
         ]
         self.create_button_grid(buttons)
 
