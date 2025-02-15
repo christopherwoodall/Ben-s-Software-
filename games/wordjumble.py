@@ -155,18 +155,18 @@ class WordJumbleGame(tk.Tk):
 
     # ---------------- Scanning Methods for Pause Menu ----------------
     def update_pause_scan_highlight(self):
-        # If no button is selected, set all to default.
         if self.pause_scan_index is None:
+            # Clear highlight from all buttons
             for btn in self.pause_buttons:
                 btn.config(bg="darkorange", activebackground="darkorange", fg="black")
-        else:
-            for idx, btn in enumerate(self.pause_buttons):
-                if idx == self.pause_scan_index:
-                    btn.config(bg="white", activebackground="white", fg="black")
-                else:
-                    btn.config(bg="darkorange", activebackground="darkorange", fg="black")
-            text = self.pause_buttons[self.pause_scan_index].cget("text")
-            self.tts_speak(text)
+            return
+        for idx, btn in enumerate(self.pause_buttons):
+            if idx == self.pause_scan_index:
+                btn.config(bg="white", activebackground="white", fg="black")
+            else:
+                btn.config(bg="darkorange", activebackground="darkorange", fg="black")
+        text = self.pause_buttons[self.pause_scan_index].cget("text")
+        self.tts_speak(text)
 
     def move_pause_scan_forward(self):
         self.pause_scan_index = (self.pause_scan_index + 1) % len(self.pause_buttons)
@@ -261,50 +261,6 @@ class WordJumbleGame(tk.Tk):
         elif self.active_menu == "pause":
             self.return_held = False
             self.pause_buttons[self.pause_scan_index].invoke()
-
-    # ---------------- Pause Menu (with Remove Letter Option) ----------------
-    def build_pause_menu(self):
-        self.pause_menu_frame = tk.Frame(self, bg="black")
-        pause_label = tk.Label(self.pause_menu_frame, text="Paused", font=("Arial", 48), fg="white", bg="black")
-        pause_label.pack(pady=50)
-        self.pause_buttons = []
-        btn_continue = tk.Button(self.pause_menu_frame, text="Continue", font=("Arial", 36), fg="black", bg="darkorange", command=self.resume_game)
-        btn_continue.pack(pady=20)
-        self.pause_buttons.append(btn_continue)
-        btn_remove = tk.Button(self.pause_menu_frame, text="Remove Letter", font=("Arial", 36), fg="black", bg="darkorange", command=self.remove_last_letter_option)
-        btn_remove.pack(pady=20)
-        self.pause_buttons.append(btn_remove)
-        btn_menu = tk.Button(self.pause_menu_frame, text="Main Menu", font=("Arial", 36), fg="black", bg="darkorange", command=self.return_to_main_menu)
-        btn_menu.pack(pady=20)
-        self.pause_buttons.append(btn_menu)
-        btn_exit = tk.Button(self.pause_menu_frame, text="Exit", font=("Arial", 36), fg="black", bg="darkorange", command=self.exit_game)
-        btn_exit.pack(pady=20)
-        self.pause_buttons.append(btn_exit)
-        self.pause_scan_index = None
-
-    def show_pause_menu(self):
-        self.active_menu = "pause"
-        self.pause_just_opened = True
-        self.game_frame.pack_forget()
-        self.pause_menu_frame.pack(fill="both", expand=True)
-        self.pause_scan_index = None  # Reset highlight index
-        self.update_pause_scan_highlight()  # Update to clear any previous highlight
-
-    def resume_game(self):
-        self.pause_menu_frame.pack_forget()
-        self.active_menu = "game"
-        self.show_game_screen()
-
-    def return_to_main_menu(self):
-        self.pause_menu_frame.pack_forget()
-        self.active_menu = "main"
-        self.show_main_menu()
-
-    def exit_game(self):
-        self.destroy()
-        current_dir = os.path.dirname(__file__)
-        comm_v9_path = os.path.join(current_dir, "..", "comm-v9.py")
-        subprocess.Popen([sys.executable, comm_v9_path])
 
     # ---------------- Remove Letter Option (via Pause Menu) ----------------
     def remove_last_letter_option(self):
@@ -540,7 +496,8 @@ class WordJumbleGame(tk.Tk):
         self.pause_just_opened = True
         self.game_frame.pack_forget()
         self.pause_menu_frame.pack(fill="both", expand=True)
-        self.pause_scan_index = None
+        self.pause_scan_index = None  # Reset highlight index
+        self.update_pause_scan_highlight()  # Clear previous highlight
 
     def resume_game(self):
         self.pause_menu_frame.pack_forget()
@@ -572,69 +529,6 @@ class WordJumbleGame(tk.Tk):
         # Automatically resume game mode.
         self.resume_game()
 
-    # ---------------- Key Event Handlers (Spacebar and Return) ----------------
-    def on_space_release(self, event):
-        if self.space_backwards_timer_id:
-            self.after_cancel(self.space_backwards_timer_id)
-            self.space_backwards_timer_id = None
-        self.spacebar_held = False
-        duration = time.time() - self.space_press_time if self.space_press_time else 0
-        if not self.space_backward_active:
-            if 0.1 <= duration < 3:
-                if self.active_menu == "game":
-                    self.move_game_scan_forward()
-                elif self.active_menu == "main":
-                    if self.menu_scan_index is None:
-                        self.menu_scan_index = 0
-                        self.update_menu_scan_highlight()
-                    else:
-                        self.move_menu_scan_forward()
-                elif self.active_menu == "pause":
-                    if self.pause_scan_index is None:
-                        self.pause_scan_index = 0
-                        self.update_pause_scan_highlight()
-                    else:
-                        self.move_pause_scan_forward()
-        self.space_backward_active = False
-
-    def on_return_press(self, event):
-        if self.active_menu not in ("game", "main", "pause"):
-            return
-        if self.return_held:
-            return
-        self.return_press_time = time.time()
-        self.return_held = True
-        if self.active_menu == "game":
-            self.return_pause_timer_id = self.after(3000, self.return_long_hold)
-
-    def return_long_hold(self):
-        if self.return_held:
-            self.pause_triggered = True
-            self.show_pause_menu()
-
-    def on_return_release(self, event):
-        duration = time.time() - self.return_press_time if self.return_press_time else 0
-        if self.active_menu == "pause" and self.pause_just_opened:
-            self.pause_just_opened = False
-            self.return_held = False
-            return
-        if self.active_menu == "game":
-            if self.return_pause_timer_id:
-                self.after_cancel(self.return_pause_timer_id)
-                self.return_pause_timer_id = None
-            self.return_held = False
-            if self.pause_triggered:
-                self.pause_triggered = False
-                return
-            if 0.1 <= duration < 3:
-                if self.scanning_index is not None:
-                    self.select_letter(self.scanning_index)
-        elif self.active_menu == "main":
-            self.return_held = False
-            self.menu_buttons[self.menu_scan_index].invoke()
-        elif self.active_menu == "pause":
-            self.return_held = False
-            self.pause_buttons[self.pause_scan_index].invoke()
 
 if __name__ == "__main__":
     app = WordJumbleGame()
