@@ -22,6 +22,7 @@ class WordJumbleGame(tk.Tk):
         self.tts_queue = queue.Queue()
         self.tts_thread = threading.Thread(target=self.process_tts_queue, daemon=True)
         self.tts_thread.start()
+        self.protocol("WM_DELETE_WINDOW", self.exit_game)
 
         # Load the Excel file.
         excel_path = os.path.join(os.path.dirname(__file__), "..", "data", "wordjumble.xlsx")
@@ -262,20 +263,6 @@ class WordJumbleGame(tk.Tk):
             self.return_held = False
             self.pause_buttons[self.pause_scan_index].invoke()
 
-    # ---------------- Remove Letter Option (via Pause Menu) ----------------
-    def remove_last_letter_option(self):
-        # Remove the last letter from current_selection and return it to the pool.
-        if self.current_selection:
-            removed = self.current_selection[-1]
-            self.current_selection = self.current_selection[:-1]
-            self.answer_label.config(text=self.current_selection)
-            btn = tk.Button(self.buttons_frame, text=removed, font=("Arial", 36), bg="darkorange", fg="black")
-            btn.pack(side="left", expand=True, fill="both", padx=5, pady=5)
-            self.letter_buttons.append(btn)
-            self.scanning_index = None
-        # Automatically resume game mode.
-        self.resume_game()
-
     # ---------------- Main Menu ----------------
     def build_main_menu(self):
         self.main_menu_frame = tk.Frame(self, bg="darkorange")
@@ -510,6 +497,10 @@ class WordJumbleGame(tk.Tk):
         self.show_main_menu()
 
     def exit_game(self):
+        # Terminate TTS thread gracefully by sending termination signal.
+        self.tts_queue.put(None)
+        # Wait for the TTS thread to finish.
+        self.tts_thread.join(timeout=2)
         self.destroy()
         current_dir = os.path.dirname(__file__)
         comm_v9_path = os.path.join(current_dir, "..", "comm-v9.py")
