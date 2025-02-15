@@ -10,6 +10,8 @@ import subprocess
 import queue
 import re
 import sys
+import ctypes
+import win32gui
 
 class WordJumbleGame(tk.Tk):
     def __init__(self):
@@ -83,6 +85,12 @@ class WordJumbleGame(tk.Tk):
         # Active mode: "main" (main menu), "game", or "pause"
         self.active_menu = None
 
+        self.monitor_focus_thread = threading.Thread(target=self.monitor_focus, daemon=True)
+        self.monitor_focus_thread.start()
+
+        self.monitor_start_menu_thread = threading.Thread(target=self.monitor_start_menu, daemon=True)
+        self.monitor_start_menu_thread.start()
+
         # ---------------- Build Screens ----------------
         self.build_main_menu()
         self.build_game_screen()
@@ -94,6 +102,52 @@ class WordJumbleGame(tk.Tk):
         self.bind("<KeyRelease-space>", self.on_space_release)
         self.bind("<KeyPress-Return>", self.on_return_press)
         self.bind("<KeyRelease-Return>", self.on_return_release)
+
+
+        # ---------------- Monitor Focus & Close Start Menu-------------
+
+    def monitor_focus(self):
+        """Ensure this application stays in focus."""
+        while True:
+            time.sleep(0.5)  # Check every 500ms
+            try:
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                if hwnd != self.winfo_id():
+                    self.force_focus()
+            except Exception as e:
+                print(f"Focus monitoring error: {e}")
+
+    def force_focus(self):
+        """Force this application to the foreground."""
+        try:
+            self.iconify()
+            self.deiconify()
+            ctypes.windll.user32.SetForegroundWindow(self.winfo_id())
+        except Exception as e:
+            print(f"Error forcing focus: {e}")
+
+    def send_esc_key(self):
+        """Send the ESC key to close the Start Menu."""
+        ctypes.windll.user32.keybd_event(0x1B, 0, 0, 0)  # ESC key down
+        ctypes.windll.user32.keybd_event(0x1B, 0, 2, 0)  # ESC key up
+        print("ESC key sent to close Start Menu.")
+
+    def is_start_menu_open(self):
+        """Check if the Start Menu is currently open and focused."""
+        hwnd = win32gui.GetForegroundWindow()  # Get the handle of the active (focused) window
+        class_name = win32gui.GetClassName(hwnd)  # Get the class name of the active window
+        return class_name in ["Shell_TrayWnd", "Windows.UI.Core.CoreWindow"]
+
+    def monitor_start_menu(self):
+        """Continuously check and close the Start Menu if it is open."""
+        while True:
+            try:
+                if self.is_start_menu_open():
+                    print("Start Menu detected. Closing it now.")
+                    self.send_esc_key()
+            except Exception as e:
+                print(f"Error in monitor_start_menu: {e}")
+            time.sleep(0.5)  # Adjust frequency as needed
 
     # ---------------- TTS Methods ----------------
     def process_tts_queue(self):
