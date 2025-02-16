@@ -561,7 +561,10 @@ class MemoryGame(tk.Tk):
     def on_exit(self):
         self.destroy()
         try:
-            subprocess.Popen(["python", "Comm-v9.py"])
+            # Get the parent directory (root folder of the project)
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            script_path = os.path.join(project_root, "Comm-v9.py")
+            subprocess.Popen([sys.executable, script_path])
         except Exception as e:
             print("Failed to launch Comm-v9.py:", e)
 

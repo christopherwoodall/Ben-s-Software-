@@ -58,7 +58,7 @@ GREEN     = (0, 128, 0)
 RED       = (255, 0, 0)
 BLACK     = (0, 0, 0)
 GREY      = (50, 50, 50)
-DARK_GREY = (50, 50, 50)
+DARK_RED = (150, 0, 0)
 BLUE      = (0, 0, 255)
 SAND      = (194, 178, 128)
 
@@ -510,7 +510,7 @@ while running:
     pygame.draw.rect(virtual_surface, GREY, (WIDTH - BORDER_THICKNESS, 0, BORDER_THICKNESS, HEIGHT))
 
     for wall in current_walls:
-        pygame.draw.rect(virtual_surface, DARK_GREY, wall)
+        pygame.draw.rect(virtual_surface, DARK_RED, wall)
     for water in current_waters:
         pygame.draw.rect(virtual_surface, BLUE, water)
     for sand in current_sands:
