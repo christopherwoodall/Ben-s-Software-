@@ -158,20 +158,32 @@ def get_predictive_suggestions(text, num_suggestions=6):
             predictions_freq[word] = score
 
     # --- Tier 3: Combine candidates ---
-    combined_predictions = predictions_ngram if predictions_ngram else predictions_freq
+    combined_predictions = {}
+    # Merge ngram predictions and frequent word predictions
+    for word, score in predictions_ngram.items():
+        combined_predictions[word] = score
+    for word, score in predictions_freq.items():
+        if word in combined_predictions:
+            combined_predictions[word] += score
+        else:
+            combined_predictions[word] = score
 
-    # Sort and limit results
+    # Sort predictions by their scores
     sorted_combined = sorted(combined_predictions.items(), key=lambda x: -x[1])
-    final_predictions = [word for word, _ in sorted_combined[:num_suggestions]]
+    final_predictions = [word for word, _ in sorted_combined]
 
-    # Ensure "YES, NO, HELP" appear **at the end**
+    # If there are fewer than num_suggestions predictions, add additional frequent words that match the current word
+    if len(final_predictions) < num_suggestions:
+        additional = [word for word in predictions_freq.keys() if word not in final_predictions]
+        final_predictions.extend(additional)
+
+    # Ensure default words ("YES", "NO", "HELP") are appended if they're not already included
     for default_word in DEFAULT_WORDS:
         if default_word not in final_predictions:
             final_predictions.append(default_word)
 
-    # Truncate to the max number of suggestions
+    # Return exactly num_suggestions predictions
     return final_predictions[:num_suggestions]
-
 
 def update_word_usage(text):
     # Remove the cursor indicator from the text.
