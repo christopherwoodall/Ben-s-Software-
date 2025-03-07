@@ -491,7 +491,7 @@ class App(tk.Tk):
         # Speak the button's text if the frame matches
         if isinstance(self.current_frame, (
             MainMenuPage, EntertainmentMenuPage, SettingsMenuPage,
-            TriviaGamePage, TriviaMenuPage, LibraryMenu, GamesPage
+            TriviaGamePage, TriviaMenuPage, LibraryMenu, GamesPage, CommunicationPageMenu
         )):
             speak(self.buttons[self.current_button_index]["text"])
 
@@ -510,7 +510,7 @@ class App(tk.Tk):
         # Speak the button's text if the frame matches
         if isinstance(self.current_frame, (
             MainMenuPage, EntertainmentMenuPage,  SettingsMenuPage,
-            TriviaGamePage, TriviaMenuPage, LibraryMenu, GamesPage
+            TriviaGamePage, TriviaMenuPage, LibraryMenu, GamesPage, CommunicationPageMenu
           
         )):
             speak(self.buttons[self.current_button_index]["text"])
@@ -804,7 +804,7 @@ class MenuFrame(tk.Frame):
         time.sleep(12)
         
         # Define the absolute path to your reference image.
-        play_image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"images" "spotifyplay.png")
+        play_image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "spotifyplay.png")
         if not os.path.exists(play_image_path):
             print(f"[DEBUG] Reference image not found: {play_image_path}")
             location = None
@@ -889,19 +889,17 @@ class MenuFrame(tk.Frame):
         pyautogui.press('enter')
         time.sleep(2)
         pyautogui.press('p')
-        print("Sent keys: x, enter, then after 2 seconds, p.")
+        print("Sent keys: x, enter, then after 2 seconds, p.")     
 
     def open_youtube(self, youtube_url, show_name):
 
         # Open youtube using your common method.
         self.movies_in_chrome(show_name, youtube_url)
-        
         # Wait for the Youtube page to load fully.
-        time.sleep(7)  # Adjust as necessary for your system.
-        
+        time.sleep(5)  # Adjust as necessary for your system.
         # Send the keyboard commands.
         pyautogui.press('f')
-        print("Sent f.")
+        print("Sent keys: f")
 
     def open_link(self, entry):
         url = entry["url"]
@@ -1014,7 +1012,7 @@ class MainMenuPage(MenuFrame):
         buttons = [
             ("Emergency", self.emergency_alert, "Emergency Alert"),
             ("Settings", lambda: parent.show_frame(SettingsMenuPage), "Settings Menu"),
-            ("Keyboard", self.open_keyboard_app, "Keyboard"),
+            ("Communication", lambda: parent.show_frame(CommunicationPageMenu), "Communication Menu"),
             ("Entertainment", lambda: parent.show_frame(EntertainmentMenuPage), "Entertainment Menu"),
         ]
 
@@ -1043,21 +1041,6 @@ class MainMenuPage(MenuFrame):
         # Highlight the first button for scanning
         if self.buttons:
             self.highlight_button(0)
-
-    def open_keyboard_app(self):
-        """Closes the current app and opens the KeyboardFrameApp."""
-        try:
-            # Get the path to the `keyboard_frame_app` script
-            script_name = "keyboard.py"  # Ensure the file is in the same directory
-            script_path = os.path.join(os.path.dirname(__file__), "keyboard", script_name)
-
-            # Open the keyboard app
-            subprocess.Popen([sys.executable, script_path])
-
-            # Close the current app
-            self.master.destroy()
-        except Exception as e:
-            print(f"Failed to open keyboard application: {e}")
 
     def scan_forward(self, event=None):
         """Move to the next button and highlight it."""
@@ -1101,6 +1084,49 @@ class MainMenuPage(MenuFrame):
                 time.sleep(2)
 
         threading.Thread(target=alert_loop, daemon=True).start()
+
+class CommunicationPageMenu(MenuFrame):
+    def __init__(self, parent):
+        super().__init__(parent, "Communication")
+        buttons = [
+            ("Back", lambda: parent.show_frame(MainMenuPage), None),
+            ("Basic", lambda: parent.show_frame(BasicPageMenu), "Basic"),
+            ("Keyboard", self.open_keyboard_app, "Keyboard"),
+        ]
+        self.create_button_grid(buttons)
+
+
+    def open_keyboard_app(self):
+        """Closes the current app and opens the KeyboardFrameApp."""
+        try:
+            # Get the path to the `keyboard_frame_app` script
+            script_name = "keyboard.py"  # Ensure the file is in the same directory
+            script_path = os.path.join(os.path.dirname(__file__), "keyboard", script_name)
+
+            # Open the keyboard app
+            subprocess.Popen([sys.executable, script_path])
+
+            # Close the current app
+            self.master.destroy()
+        except Exception as e:
+            print(f"Failed to open keyboard application: {e}")
+
+
+class BasicPageMenu(MenuFrame):
+    def __init__(self, parent):
+        super().__init__(parent, "Basic")
+        buttons = [
+            ("Back", lambda: self.parent.show_frame(CommunicationPageMenu), None),  # Add Back button
+            ("Yes", lambda: None, "Yes"),
+            ("No", lambda: None, "No"),
+            ("IDK", lambda: None, "I Don't Know"),
+            ("Maybe", lambda: None, "Maybe"),
+            ("Explain", lambda: None, "Can you explain more?"),
+            ("Thank", lambda: None, "Thank you"),
+            ("Sick", lambda: None, "I don't feel good."),
+            ("Break", lambda: None, "I need a break"),
+        ]
+        self.create_button_grid(buttons)        
 
 import subprocess
 import pyautogui
@@ -1275,8 +1301,8 @@ class GamesPage(MenuFrame):
             ("Tic-Tac-Toe", lambda: self.open_game("tictactoe"), "Tic-Tac-Toe"),
             ("Mini Golf", lambda: self.open_game("bensgolf"), "Mini Golf"),
             ("Word Jumble", lambda: self.open_game("wordjumble"), "Word Jumble"),
-            ("Game 5", lambda: self.coming_soon("Game 5"), "Game 5"),
-            ("Game 6", lambda: self.coming_soon("Game 6"), "Game 6"),
+            ("Tower Defense", lambda: self.open_game("towerdefense"), "Tower Defense"),
+            ("Baseball", lambda: self.open_game("baseball"), "Baseball"),
             ("Game 7", lambda: self.coming_soon("Game 7"), "Game 7"),
             ("Game 8", lambda: self.coming_soon("Game 8"), "Game 8"),
         ]
@@ -1305,23 +1331,28 @@ class GamesPage(MenuFrame):
             grid_frame.columnconfigure(j, weight=1)    
     
     def open_game(self, game_title):
-        """
-        Given a game title (e.g., "Concentration" or "Game 2"), this function 
-        converts it to a script file name (e.g., "concentration.py" or "game2.py") 
-        and opens that script.
-        """
         # Convert the game title to a file name.
         # For example, "Concentration" -> "concentration.py"
-        # "Game 2" -> "game2.py"
         script_name = f"{game_title.lower().replace(' ', '')}.py"
-        # Build the full path to the script:
+
+        # Build the full path to the script located in the "games" folder.
         script_path = os.path.join(os.path.dirname(__file__), "games", script_name)
+
+        # Check if the script exists.
+        if not os.path.isfile(script_path):
+            print(f"Script not found: {script_path}")
+            self.coming_soon()
+            return
+
         try:
-            subprocess.Popen([sys.executable, script_path])
-            # Optionally close the current app (if desired)
+            # Launch the script with its own directory as the working directory.
+            subprocess.Popen([sys.executable, script_path],
+                            cwd=os.path.dirname(script_path))
+            # Optionally close the current app (if desired).
             self.master.destroy()
         except Exception as e:
             print(f"Failed to open {game_title}: {e}")
+
 
     def coming_soon(self):
         speak("This game is coming soon.")
@@ -1636,7 +1667,8 @@ class TriviaGamePage(MenuFrame):
         super().__init__(parent, f"Trivia: {topic}")
 
         # Load an image for Trivia.
-        self.photo = tk.PhotoImage(file="images/trivia.png")
+        image_path = os.path.join(os.path.dirname(__file__), "images", "trivia.png")
+        self.photo = tk.PhotoImage(file=image_path)
         self.image_label = tk.Label(self, image=self.photo, bg="black")
         self.image_label.pack(pady=10)
 
