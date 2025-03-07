@@ -359,7 +359,7 @@ class WordJumbleGame(tk.Tk):
         self.sentence_label = tk.Label(self.game_frame, text="", font=("Arial", 36), fg="white", bg="black")
         self.sentence_label.pack(pady=30)
         # Make the answer label about 300% larger and bold.
-        self.answer_label = tk.Label(self.game_frame, text="", font=("Arial", 108, "bold"), fg="white", bg="black")
+        self.answer_label = tk.Label(self.game_frame, text="", font=("Arial", 128, "bold"), fg="white", bg="black")
         self.answer_label.pack(pady=30)
         # Level indicator at top right.
         self.level_label = tk.Label(self.game_frame, text="", font=("Arial", 24), fg="white", bg="black")

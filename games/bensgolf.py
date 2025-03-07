@@ -14,6 +14,8 @@ pygame.mixer.init()  # For sound effects
 tts_engine = pyttsx3.init()
 tts_engine.setProperty('rate', 150)
 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # ---------------- Load Sound Effects ----------------
 # Relative paths: game lives in "games" folder, sound effects in "../soundfx/"
 putt_sound = pygame.mixer.Sound(os.path.join("..", "soundfx", "putt.wav"))
@@ -58,7 +60,7 @@ GREEN     = (0, 128, 0)
 RED       = (255, 0, 0)
 BLACK     = (0, 0, 0)
 GREY      = (50, 50, 50)
-DARK_RED = (150, 0, 0)
+DARK_RED  = (150, 0, 0)
 BLUE      = (0, 0, 255)
 SAND      = (194, 178, 128)
 
@@ -91,6 +93,7 @@ TOTAL_LEVELS = 9
 current_hole_radius = BASE_HOLE_RADIUS
 
 # Hazards
+# current_walls can be either axis-aligned (tuple) or rotated (dict with keys "rect" and "angle")
 current_walls = []
 current_waters = []
 current_sands = []
@@ -117,6 +120,7 @@ def circle_rect_collision(cx, cy, radius, rx, ry, rw, rh):
     return distance < radius
 
 def bounce_off_hazard_wall(cx, cy, vel, radius, rect):
+    # Axis-aligned wall collision detection.
     rx, ry, rw, rh = rect
     if not circle_rect_collision(cx, cy, radius, rx, ry, rw, rh):
         return cx, cy
@@ -136,6 +140,43 @@ def bounce_off_hazard_wall(cx, cy, vel, radius, rect):
     vel[0] = (vel[0] - 2 * dot * n_x) * 0.8
     vel[1] = (vel[1] - 2 * dot * n_y) * 0.8
     return cx, cy
+
+def bounce_off_rotated_wall(cx, cy, vel, radius, wall):
+    r = wall["rect"]
+    angle_rad = math.radians(wall.get("angle", 0))
+    # Translate circle center to wall's local coordinate system
+    cx_local = math.cos(-angle_rad) * (cx - r.centerx) - math.sin(-angle_rad) * (cy - r.centery)
+    cy_local = math.sin(-angle_rad) * (cx - r.centerx) + math.cos(-angle_rad) * (cy - r.centery)
+    half_w = r.width / 2
+    half_h = r.height / 2
+    # Axis aligned rectangle in local coordinates: from -half_w to half_w, -half_h to half_h
+    closest_x = clamp(cx_local, -half_w, half_w)
+    closest_y = clamp(cy_local, -half_h, half_h)
+    dx = cx_local - closest_x
+    dy = cy_local - closest_y
+    dist = math.hypot(dx, dy)
+    if dist >= radius:
+        return cx, cy  # No collision
+    if dist == 0:
+        dx, dy = 1, 0
+        dist = 1
+    penetration = radius - dist
+    n_local_x = dx / dist
+    n_local_y = dy / dist
+    cx_local += n_local_x * penetration
+    cy_local += n_local_y * penetration
+    # Convert back to global coordinates
+    cx_new = math.cos(angle_rad) * cx_local - math.sin(angle_rad) * cy_local + r.centerx
+    cy_new = math.sin(angle_rad) * cx_local + math.cos(angle_rad) * cy_local + r.centery
+    # Reflect velocity
+    vx_local = math.cos(-angle_rad) * vel[0] - math.sin(-angle_rad) * vel[1]
+    vy_local = math.sin(-angle_rad) * vel[0] + math.cos(-angle_rad) * vel[1]
+    dot = vx_local * n_local_x + vy_local * n_local_y
+    vx_local = (vx_local - 2 * dot * n_local_x) * 0.8
+    vy_local = (vy_local - 2 * dot * n_local_y) * 0.8
+    vel[0] = math.cos(angle_rad) * vx_local - math.sin(angle_rad) * vy_local
+    vel[1] = math.sin(angle_rad) * vx_local + math.cos(angle_rad) * vy_local
+    return cx_new, cy_new
 
 def announce_level(level):
     if level in [1, 3, 7]:
@@ -166,6 +207,7 @@ def load_level(level):
         current_sands = []
         current_hole_radius = BASE_HOLE_RADIUS
     elif level == 2:
+        # Example: axis-aligned wall as tuple
         current_walls = [(489, 279, 120, 240)]
         current_waters = []
         current_sands = []
@@ -184,17 +226,34 @@ def load_level(level):
         hole_x, hole_y = (976, 159)
         current_hole_radius = BASE_HOLE_RADIUS
     elif level == 4:
-        current_walls = []
+        current_walls = [
+            (902, 590, 80, 160),
+            (725, 50, 80, 160),
+            (316, 215, 120, 240),
+        ]
         current_waters = [
-            (670, 660, 150, 90), (670, 571, 150, 90),
-            (396, 49, 150, 90), (396, 137, 150, 90)
+            (425, 50, 150, 90),
+            (575, 50, 150, 90),
+            (752, 659, 150, 90),
+            (602, 659, 150, 90),
+            (453, 659, 150, 90),
         ]
         current_sands = [
-            (546, 48, 150, 90), (546, 137, 150, 90),
-            (819, 660, 150, 90), (819, 571, 150, 90)
+            (1100, 281, 50, 30),
+            (1100, 309, 50, 30),
+            (1100, 337, 50, 30),
+            (1100, 367, 50, 30),
+            (1100, 397, 50, 30),
+            (1052, 383, 50, 30),
+            (1052, 353, 50, 30),
+            (1051, 325, 50, 30),
+            (1051, 296, 50, 30),
+            (1022, 311, 50, 30),
+            (1015, 338, 50, 30),
+            (1023, 365, 50, 30),
         ]
-        ball_x, ball_y = (190, 260)
-        hole_x, hole_y = (943, 170)
+        ball_x, ball_y = (180, 656)
+        hole_x, hole_y = (1001, 157)
         current_hole_radius = BASE_HOLE_RADIUS
     elif level == 5:
         current_walls = [
@@ -206,9 +265,7 @@ def load_level(level):
         current_sands = [
             (448, 50, 50, 30), (461, 79, 50, 30), (487, 107, 50, 30),
             (497, 50, 50, 30), (511, 77, 50, 30), (502, 128, 50, 30),
-            (528, 143, 50, 30), (552, 115, 50, 30), (536, 102, 50, 30),
-            (560, 75, 50, 30), (545, 50, 50, 30), (589, 50, 50, 30),
-            (597, 79, 50, 30), (582, 104, 50, 30), (570, 135, 50, 30)
+            (528, 143, 50, 30), (552, 115, 50, 30)
         ]
         ball_x, ball_y = (254, 397)
         hole_x, hole_y = (666, 515)
@@ -233,30 +290,48 @@ def load_level(level):
         current_hole_radius = BASE_HOLE_RADIUS
     elif level == 7:
         current_walls = [
-            (298, 510, 120, 240), (298, 323, 120, 240),
-            (305, 49, 50, 100), (354, 49, 50, 100), (403, 49, 50, 100),
-            (739, 173, 50, 100), (786, 222, 50, 100), (833, 269, 50, 100),
-            (881, 313, 50, 100)
+            (454, 589, 80, 160),
+            (474, 50, 80, 160),
+            (474, 209, 80, 160),
+            (749, 510, 120, 240),
         ]
         current_waters = [
-            (49, 660, 150, 90), (196, 660, 150, 90), (345, 660, 150, 90),
-            (493, 660, 150, 90), (642, 660, 150, 90), (851, 660, 150, 90),
-            (999, 660, 150, 90), (740, 660, 150, 90), (51, 49, 150, 90),
-            (181, 49, 150, 90), (306, 49, 150, 90), (821, 50, 50, 30),
-            (772, 50, 50, 30), (723, 50, 50, 30), (692, 50, 50, 30),
-            (868, 50, 50, 30), (913, 50, 50, 30), (960, 50, 50, 30),
-            (1006, 50, 50, 30), (1051, 50, 50, 30), (1100, 50, 50, 30),
-            (1100, 77, 50, 30), (1100, 106, 50, 30)
+            (324, 49, 150, 90),
+            (554, 49, 150, 90),
+            (701, 49, 150, 90),
+            (850, 49, 150, 90),
+            (1000, 49, 150, 90),
+            (869, 720, 50, 30),
+            (919, 720, 50, 30),
+            (966, 720, 50, 30),
+            (1013, 720, 50, 30),
+            (1060, 720, 50, 30),
+            (1100, 720, 50, 30),
         ]
         current_sands = [
-            (49, 569, 150, 90), (199, 569, 150, 90), (349, 569, 150, 90),
-            (499, 569, 150, 90), (648, 569, 150, 90), (798, 569, 150, 90),
-            (946, 569, 150, 90), (1000, 569, 150, 90), (514, 143, 100, 60),
-            (539, 92, 100, 60), (597, 49, 100, 60), (571, 108, 100, 60),
-            (440, 84, 100, 60), (403, 49, 100, 60), (500, 49, 100, 60)
+            (50, 692, 100, 60),
+            (147, 691, 100, 60),
+            (237, 693, 100, 60),
+            (81, 644, 100, 60),
+            (176, 641, 100, 60),
+            (143, 600, 100, 60),
+            (1101, 190, 50, 30),
+            (1101, 218, 50, 30),
+            (1101, 248, 50, 30),
+            (1101, 277, 50, 30),
+            (1102, 304, 50, 30),
+            (1058, 216, 50, 30),
+            (1057, 246, 50, 30),
+            (1059, 274, 50, 30),
+            (1027, 241, 50, 30),
+            (1064, 300, 50, 30),
+            (1039, 270, 50, 30),
+            (1049, 293, 50, 30),
+            (1101, 332, 50, 30),
+            (1077, 321, 50, 30),
         ]
-        ball_x, ball_y = (124, 403)
-        hole_x, hole_y = (989, 176)
+        ball_x, ball_y = (157, 192)
+        hole_x, hole_y = (1034, 655)
         current_hole_radius = BASE_HOLE_RADIUS
     elif level == 8:
         current_walls = [
@@ -509,8 +584,20 @@ while running:
     pygame.draw.rect(virtual_surface, GREY, (0, 0, BORDER_THICKNESS, HEIGHT))
     pygame.draw.rect(virtual_surface, GREY, (WIDTH - BORDER_THICKNESS, 0, BORDER_THICKNESS, HEIGHT))
 
+    # Draw walls: check if rotated or axis-aligned
     for wall in current_walls:
-        pygame.draw.rect(virtual_surface, DARK_RED, wall)
+        if isinstance(wall, dict):
+            def draw_rotated_wall(wall):
+                r = wall["rect"]
+                angle = wall.get("angle", 0)
+                temp_surface = pygame.Surface((r.width, r.height), pygame.SRCALPHA)
+                temp_surface.fill(DARK_RED)
+                rotated_surface = pygame.transform.rotate(temp_surface, angle)
+                new_rect = rotated_surface.get_rect(center=r.center)
+                virtual_surface.blit(rotated_surface, new_rect)
+            draw_rotated_wall(wall)
+        else:
+            pygame.draw.rect(virtual_surface, DARK_RED, wall)
     for water in current_waters:
         pygame.draw.rect(virtual_surface, BLUE, water)
     for sand in current_sands:
@@ -574,7 +661,10 @@ while running:
         ball_velocity[1] *= -0.8
 
     for wall in current_walls:
-        ball_x, ball_y = bounce_off_hazard_wall(ball_x, ball_y, ball_velocity, BASE_BALL_RADIUS, wall)
+        if isinstance(wall, dict):
+            ball_x, ball_y = bounce_off_rotated_wall(ball_x, ball_y, ball_velocity, BASE_BALL_RADIUS, wall)
+        else:
+            ball_x, ball_y = bounce_off_hazard_wall(ball_x, ball_y, ball_velocity, BASE_BALL_RADIUS, wall)
 
     hit_water = False
     for water in current_waters:
