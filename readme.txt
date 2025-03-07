@@ -58,13 +58,12 @@ This project enhances accessibility for individuals with physical challenges, su
 - **Games Menu**:
   - `concentration.py`: A memory game.
   - `tictactoe.py`: Classic Tic Tac Toe.
-  - More games coming soon, including Golf, Hangman, and Text Adventures.
+  - `wordjumble.py`: A spelling challenge game.
+  - `towerdefense.py`: A tower defense strategy game
+  - `bensgolf.py`: A mini golf game with Happy Gilmore soundfx.
+  - `baseball.py`: A simple probability baseball game with some graphics/animation.
+  - More games coming soon with Text Adventures and porting a controller for scan/select method to utilize to choose options in choose your own adventure games.
 - **Pause Menu**: Holding down the `Return` key for more than six seconds opens a pause window.
-
-## Future Enhancements
-
-- **More Games**: Golf, Hangman, and text-based adventures.
-- **Virtual Pet**: A "Tamagotchi"-style pet for Ben to feed and interact with.
 
 ## Installation
 
@@ -79,7 +78,7 @@ cd ben-accessibility-software
 pip install -r requirements.txt
 
 # Run the application
-python main.py
+comm-v9.py
 ```
 
 ## Usage
@@ -101,7 +100,7 @@ python main.py
 
 - **Shows List**: Update `shows.xlsx` to add new shows.
 - **Trivia Questions**: Update `trivia_questions.xlsx` for new trivia categories and questions.
-- **Button Mapping**: Modify `settings.py` to adjust input mappings.
+- **Word Jumble**: Update `wordjumble.xlsx` for new words in the jumble game (2-3-4-5-6-7-8 letter words, follow pattern of input).
 
 ## Dependencies
 
