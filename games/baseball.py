@@ -33,14 +33,6 @@ def get_window_handle():
         print(f"Error getting window handle: {e}")
         return None
 
-def force_focus():
-    hwnd = get_window_handle()
-    try:
-        ctypes.windll.user32.ShowWindow(hwnd, 9)
-        ctypes.windll.user32.SetForegroundWindow(hwnd)
-    except Exception as e:
-        print(f"Error forcing focus: {e}")
-
 def monitor_focus():
     while True:
         time.sleep(0.5)
@@ -85,6 +77,15 @@ class BaseballGame:
         self.root.state("zoomed")
         self.base_scale = min(self.screen_width / 800, self.screen_height / 600)
         self.diamond_side = min(self.screen_width, self.screen_height) * 0.4
+        self.root.attributes("-fullscreen", True)
+
+        # Persistent top frame for window controls (Close/Minimize)
+        self.top_frame = tk.Frame(self.root, bg="lightgray")
+        self.top_frame.pack(side="top", fill="x")
+        minimize_btn = tk.Button(self.top_frame, text="_", command=self.minimize_game, font=("Arial", 12))
+        minimize_btn.pack(side="right", padx=5, pady=5)
+        close_btn = tk.Button(self.top_frame, text="X", command=self.close_game, font=("Arial", 12))
+        close_btn.pack(side="right", padx=5, pady=5)        
 
         # Teams: Top half, you bat (red); Bottom half, you pitch (computer bats, blue)
         self.home_team = "Blue"   # computer defends in bottom half
@@ -123,6 +124,26 @@ class BaseballGame:
         self.current_strikes = 0
         self.first_pitch = True
 
+    def force_focus(self):
+        try:
+            # Update window tasks to ensure the window is fully created
+            self.root.update_idletasks()
+            hwnd = self.root.winfo_id()
+            if hwnd:
+                self.root.iconify()
+                self.root.deiconify()
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            else:
+                print("Window handle not available. Skipping focus adjustment.")
+        except Exception as e:
+            print(f"Error forcing focus: {e}")
+
+    def close_game(self):
+        self.root.destroy()
+    
+    def minimize_game(self):
+        self.root.iconify()
+
     def _tts_worker(self):
         while True:
             text = self.tts_queue.get()
@@ -136,8 +157,10 @@ class BaseballGame:
         self.tts_queue.put(text)
 
     def clear_screen(self):
+        # Only destroy widgets that are not the persistent top frame.
         for widget in self.root.winfo_children():
-            widget.destroy()
+            if widget != self.top_frame:
+                widget.destroy()
 
     def wait_for_tts_and_show_swing(self):
         if getattr(self, "tts_playing", False):
@@ -1093,4 +1116,6 @@ class BaseballGame:
 if __name__ == "__main__":
     root = tk.Tk()
     game = BaseballGame(root)
+    # Delay force_focus to allow the window to be fully created
+    root.after(1000, game.force_focus)
     root.mainloop()
