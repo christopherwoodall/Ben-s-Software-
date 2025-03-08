@@ -921,7 +921,15 @@ class BaseballGame:
         elif r <= strike + ball:
             outcome = "Ball"
         else:
-            hit_choices = {"Single": 20, "Double": 4, "Triple": 1, "HR": 0.5}
+            # Updated hit_choices to include pop fly outs and ground outs
+            hit_choices = {
+                "Single": 20,
+                "Double": 4,
+                "Triple": 1,
+                "HR": 0.5,
+                "Pop Fly Out": 10,
+                "Ground Out": 10
+            }
             outcome = self.weighted_choice(hit_choices)
             if outcome == "HR":
                 outcome = "Home Run"
