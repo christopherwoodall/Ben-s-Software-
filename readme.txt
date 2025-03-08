@@ -18,6 +18,7 @@ This project enhances accessibility for individuals with physical challenges, su
 ### Navigation
 
 - **Spacebar (Single Press)**: Advances forward by one item.
+- **Spacebar Disable Spacebar in Chrome (Spacebar continuously pauses videos in chrome, this causes issues. Use AutoHotKey with the script "disable_space_chrome.ahk" at Windows Startup to disable)
 - **Spacebar (Held for More Than 3 Seconds)**: Continuously scans backward.
 - **Keyboard Navigation**:
   - Works similarly to the main navigation.
