@@ -267,14 +267,15 @@ class BaseballGame:
             quit()
               
     def show_pause_menu(self):
-        """ Displays a full-screen pause menu without auto-selecting an item. """
+        # Save the current mode (which might be "batting_selection" or "pitch_selection")
+        self.previous_mode = self.current_mode
         self.current_mode = "pause_menu"
-        
-        # Create fullscreen pause window
         self.pause_window = tk.Toplevel(self.root)
         self.pause_window.title("Pause Menu")
         self.pause_window.attributes("-fullscreen", True)
         self.pause_window.configure(bg="darkgray")
+        self.pause_window.transient(self.root)
+        self.pause_window.grab_set()  # make it modal
 
         title = tk.Label(self.pause_window, text="Paused", font=("Arial", int(50 * self.base_scale)), bg="darkgray", fg="white")
         title.pack(pady=50)
@@ -291,7 +292,6 @@ class BaseballGame:
             btn.pack(pady=20, fill="x")
             self.pause_buttons.append(btn)
 
-        # Bind keys to pause window
         self.pause_window.bind("<KeyRelease-space>", self.on_pause_space)
         self.pause_window.bind("<KeyRelease-Return>", self.on_pause_return)
         self.pause_window.focus_force()
@@ -317,15 +317,25 @@ class BaseballGame:
             self.pause_buttons[self.pause_index].invoke()
 
     def pause_menu_select(self, selection):
-        """ Handles pause menu selection. """
+        try:
+            self.pause_window.grab_release()
+        except Exception as e:
+            print("Error releasing grab:", e)
+        self.pause_window.destroy()
+
         if selection == "Continue Game":
-            self.pause_window.destroy()
+            # Clean up any lingering interactive frames
+            if hasattr(self, "swing_frame") and self.swing_frame.winfo_exists():
+                self.swing_frame.destroy()
+            if hasattr(self, "pitch_frame") and self.pitch_frame.winfo_exists():
+                self.pitch_frame.destroy()
+
+            # Resume game: clear any obsolete menus and continue the game loop.
             self.current_mode = "gameplay"
-            self.root.focus_force()  # Ensure main window regains focus
+            self.continue_game()  # Or call the appropriate function to resume
         elif selection == "Main Menu":
-            self.pause_window.destroy()
             self.setup_main_menu()
-                
+
     # ---------- Gameplay Setup & Drawing ----------
     def setup_gameplay_screen(self):
         self.clear_screen()
@@ -495,16 +505,19 @@ class BaseballGame:
                                 outline=color, width=2, tags="pitch_marker")
 
     def show_swing_menu(self):
+        # Destroy any existing swing menu before creating a new one.
+        if hasattr(self, "swing_frame") and self.swing_frame.winfo_exists():
+            self.swing_frame.destroy()
+
         self.swing_frame = tk.Frame(self.root, bg="lightgray")
         self.swing_frame.place(relx=0.05, rely=0.40, relwidth=0.2, relheight=0.5)
         # Base options for swinging.
         self.menu_options = ["Normal Swing", "Power Swing", "Hold", "Bunt"]
-        # Only add "Steal 2nd Base" if there's a runner on first and second is empty.
         if self.bases.get("first") and not self.bases.get("second"):
             self.menu_options.append("Steal 2nd Base")
-        # If there's a runner on second, add "Steal 3rd Base".
         if self.bases.get("second"):
             self.menu_options.append("Steal 3rd Base")
+        
         self.swing_buttons = []
         self.swing_index = -1
         for opt in self.menu_options:
@@ -515,7 +528,8 @@ class BaseballGame:
             btn.pack(pady=5, fill="x")
             self.swing_buttons.append(btn)
         self.update_swing_highlight()
-        self.swing_frame.focus_set()
+        # Force focus so its key bindings are active.
+        self.swing_frame.focus_force()
         self.swing_frame.bind("<KeyRelease-space>", self.on_swing_space)
         self.swing_frame.bind("<KeyRelease-Return>", self.on_swing_return)
 
@@ -812,7 +826,10 @@ class BaseballGame:
         self.wait_for_tts_and_show_pitch()
 
     def show_pitch_menu(self):
-        # Create the pitch selection menu only after TTS is finished.
+        # Destroy any existing pitch menu before creating a new one.
+        if hasattr(self, "pitch_frame") and self.pitch_frame.winfo_exists():
+            self.pitch_frame.destroy()
+
         self.pitch_frame = tk.Frame(self.root, bg="lightgray")
         self.pitch_frame.place(relx=0.05, rely=0.45, relwidth=0.2, relheight=0.6)
         self.menu_options = ["Fastball", "Curveball", "Slider", "Knuckleball", "Changeup"]
@@ -826,7 +843,7 @@ class BaseballGame:
             btn.pack(pady=5, fill="x")
             self.pitch_buttons.append(btn)
         self.update_pitch_highlight()
-        self.pitch_frame.focus_set()
+        self.pitch_frame.focus_force()  # Ensure the pitch menu grabs focus
         self.pitch_frame.bind("<KeyRelease-space>", self.on_pitch_space)
         self.pitch_frame.bind("<KeyRelease-Return>", self.on_pitch_return)
 
