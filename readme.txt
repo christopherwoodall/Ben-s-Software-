@@ -1,4 +1,4 @@
-**there are mant duplicate functions in this software yet to be cleaned**
+**there are many duplicate functions in this software yet to be cleaned**
 
 # Ben's Accessibility Software
 
