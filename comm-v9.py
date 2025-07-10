@@ -207,23 +207,60 @@ def bring_application_to_focus():
     except Exception as e:
         print(f"Error focusing application: {e}")
 
-# Determine the absolute path to the "data" subfolder.
+import json
+import time
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import urllib.parse
+import os
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-# Construct the full path to the last_watched.json file.
 LAST_WATCHED_FILE = os.path.join(DATA_DIR, "last_watched.json")
 
+# Function to load the last_watched.json data
 def load_last_watched():
     if os.path.exists(LAST_WATCHED_FILE):
-        with open(LAST_WATCHED_FILE, "r") as file:
-            return json.load(file)
+        with open(LAST_WATCHED_FILE, "r") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return {}
     return {}
 
+# Function to save the last_watched data to the file
 def save_last_watched(data):
-    # Ensure the data directory exists.
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    with open(LAST_WATCHED_FILE, "w") as file:
-        json.dump(data, file)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(LAST_WATCHED_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# HTTP request handler to save URLs
+class URLSaveHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # Parse the URL from the request
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        url = qs.get("url", [None])[0]
+
+        # Get the active show
+        show = MenuFrame.active_show
+
+        if show and url:
+            # Read the existing data from last_watched.json
+            data = load_last_watched()
+            data[show] = url  # Update or add the show and URL
+            save_last_watched(data)  # Save the updated data
+            print(f"[URL-SAVED] {show} → {url}")
+
+        # Send a response back to indicate success
+        self.send_response(204)
+        self.end_headers()
+
+# Start the HTTP server
+def start_url_server():
+    server = HTTPServer(("127.0.0.1", 8765), URLSaveHandler)
+    server.serve_forever()
+
+# Start the server in a background thread
+threading.Thread(target=start_url_server, daemon=True).start()
 
 import os
 import pandas as pd
@@ -266,6 +303,27 @@ def load_links(file_path="shows.xlsx"):
     
     return organized
 
+def load_communication_phrases(file_path="communication.xlsx"):
+    """
+    Loads phrases from communication.xlsx in the format:
+    | Category | Display | Text to Speech |
+    Returns a dict: { "Category1": [(label1, speak1), (label2, speak2), ...], ... }
+    """
+    abs_path = os.path.join(os.path.dirname(__file__), "data", file_path)
+    try:
+        df = pd.read_excel(abs_path)
+    except Exception as e:
+        print(f"[ERROR] Failed to load communication.xlsx: {e}")
+        return {}
+
+    phrases_by_category = defaultdict(list)
+    for _, row in df.iterrows():
+        category = str(row["Category"]).strip()
+        label = str(row["Display"]).strip()
+        speak_text = str(row["Text to Speech"]).strip()
+        if category and label and speak_text:
+            phrases_by_category[category].append((label, speak_text))
+    return phrases_by_category
 
 class KeySequenceListener:
     def __init__(self, app):
@@ -610,25 +668,29 @@ class MenuFrame(tk.Frame):
             speak(speak_text)
 
     def open_in_chrome(self, show_name, default_url, persistent=True):
-        if persistent:
-            last_watched = load_last_watched()
-            url_to_open = last_watched.get(show_name, default_url)
-        else:
-            url_to_open = default_url
-        try:
-            subprocess.run(
-                ["start", "chrome", "--remote-debugging-port=9222", "--start-fullscreen", url_to_open],
-                shell=True
-            )
-            print(f"Opened URL for {show_name}: {url_to_open}")
-        except Exception as e:
-            print(f"Error opening URL: {e}")
-            return
+        chrome_exe = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 
-        # Only start the tracking thread if persistence is enabled.
+        # ——— Load and override with whatever’s in last_watched.json ———
+        url_to_open = default_url
         if persistent:
-            MenuFrame.active_show = show_name
-            threading.Thread(target=self.save_current_url, args=(show_name, default_url), daemon=True).start()
+            last = load_last_watched()
+            if show_name in last:
+                url_to_open = last[show_name]
+                print(f"[LOAD] Resuming {show_name} from saved URL → {url_to_open}")
+            else:
+                print(f"[LOAD] No saved record for {show_name}, using default.")
+
+        args = [
+            chrome_exe,
+            "--start-fullscreen",
+            url_to_open
+        ]
+
+        try:
+            subprocess.Popen(args, shell=False)
+            print(f"[LAUNCH] Chrome → {url_to_open}")
+        except Exception as e:
+            print(f"[ERROR] launching Chrome: {e}")
 
     def movies_in_chrome(self, show_name, default_url):
         """
@@ -643,52 +705,6 @@ class MenuFrame(tk.Frame):
             print(f"Opened movie URL for {show_name}: {default_url}")
         except Exception as e:
             print(f"Error opening movie URL for {show_name}: {e}")
-
-    import requests
-
-    def get_active_chrome_url(self):
-        """Retrieve the active URL from Chrome using the DevTools Protocol."""
-        try:
-            response = requests.get("http://localhost:9222/json")
-            tabs = response.json()
-
-            for tab in tabs:
-                if tab.get("type") == "page" and tab.get("url") and tab.get("url").startswith("http"):
-                    return tab["url"]  # Return the active or first valid tab's URL
-
-            logging.error("No valid active Chrome tab found.")
-        except requests.exceptions.ConnectionError as e:
-            logging.error(f"Failed to connect to Chrome DevTools: {e}")
-            return None
-        except Exception as e:
-            logging.error(f"Error retrieving Chrome URL: {e}")
-            return None
-
-    def save_current_url(self, show_name, expected_url):
-        """Periodically save the currently active Chrome URL for the given show."""
-        print(f"[DEBUG] Started tracking URL for: {show_name}")
-
-        base_url = "/".join(expected_url.split("/")[:4])  # Extract base URL
-
-        while MenuFrame.active_show == show_name:  # ✅ Only track if this is the active show
-            time.sleep(5)  # Check every 5 seconds
-
-            current_url = self.get_active_chrome_url()
-            print(f"[DEBUG] Current URL fetched: {current_url}")
-
-            if current_url and current_url.startswith(base_url):
-                last_watched = load_last_watched()
-                last_watched[show_name] = current_url  # ✅ Save dynamically updated URL
-                save_last_watched(last_watched)
-                print(f"[DEBUG] Updated last-watched URL for {show_name}: {current_url}")
-            else:
-                print(f"[DEBUG] No matching URL found for {show_name}. Current URL: {current_url}")
-
-            if not is_chrome_running():  # Stop tracking if Chrome is closed
-                print(f"[DEBUG] Chrome is no longer running. Stopping updates for {show_name}.")
-                break
-
-        print(f"[DEBUG] Stopped tracking URL for: {show_name}")
     
     def open_and_click(self, show_name, default_url, x_offset=0, y_offset=0):
         """Open the given URL, click on the specified position, and ensure fullscreen mode."""
@@ -846,6 +862,33 @@ class MenuFrame(tk.Frame):
         pyautogui.hotkey('alt', 's')
         print("[DEBUG] Sent Alt+S to shuffle.")
 
+    def save_current_url(self, show_name, expected_url):
+        """
+        Every 30 seconds, fetch the active URL and save it under `show_name` in last_watched.json.
+        """
+        base = "/".join(expected_url.split("/")[:4])
+        print(f"[TRACKER] Started URL-tracker for: {show_name}")
+
+        while MenuFrame.active_show == show_name:
+            time.sleep(5)  # Wait for 30 seconds
+
+            current_url = expected_url  # Here, you can use the expected URL directly
+            print(f"[TRACK] fetched for {show_name}: {current_url}")
+
+            # Check if the current URL matches the base URL and save it
+            if current_url and current_url.startswith(base):
+                data = load_last_watched()
+                data[show_name] = current_url
+                save_last_watched(data)
+                print(f"[SAVED] {show_name} → {current_url}")
+            else:
+                print(f"[SKIP] No save for {show_name}, URL: {current_url}")
+
+            if not is_chrome_running():
+                print(f"[TRACKER] Chrome closed, stopping tracker for {show_name}")
+                break
+
+        print(f"[TRACKER] Exited URL-tracker for: {show_name}")
 
     def open_plex_movies(self, plex_url, show_name):
         """
@@ -902,97 +945,95 @@ class MenuFrame(tk.Frame):
         print("Sent keys: f")
 
     def open_link(self, entry):
-        url = entry["url"]
         title = entry["title"]
-        content_type = entry.get("type", "movies").lower()  # Default to movies if not given
+        url = entry["url"]
+        content_type = entry.get("type", "movies").lower()
 
         print(f"[DEBUG] Requested: {title} - URL: {url} (Type: {content_type})")
 
-        # ✅ Always check last_watched.json first for shows
-        if content_type in ["shows"]:
-            last_watched = load_last_watched()
-            if title in last_watched:
-                print(f"[DEBUG] Last-watched found for {title}: {last_watched[title]}")
-                url = last_watched[title]  # Override with last-watched episode
+        # 1) Tell the URL‐save extension/server which show key to use
+        MenuFrame.active_show = title
+        print(f"[DEBUG] Active show set → {MenuFrame.active_show}")
+
+        # 2) For shows, overlay with last-watched URL if available
+        if content_type == "shows":
+            last = load_last_watched()
+            if title in last:
+                url = last[title]
+                print(f"[DEBUG] Last-watched found for {title}: {url}")
             else:
-                print(f"[DEBUG] No last-watched found for {title}. Using shows.xlsx default.")
+                print(f"[DEBUG] No last-watched found for {title}, using default from spreadsheet")
 
-            print(f"[DEBUG] Final URL being used for {title}: {url}")
+        print(f"[DEBUG] Final URL for {title}: {url}")
 
-            # ✅ Apply platform-specific opening logic
+        # 3) Dispatch by type/platform
+        if content_type == "shows":
             if "plex.tv" in url:
-                print(f"[DEBUG] Detected Plex Show. Using open_plex() for {title}")
-                self.open_plex(url, title)  # Plex-specific method
-
-            elif "youtube.com" in url or "youtu.be" in url:  # 🔥 Ensure ALL YouTube links use open_youtube()
-                print(f"[DEBUG] Detected YouTube link. Using open_youtube() for {title}.")
-                self.open_youtube(url, title)  # ✅ Always use open_youtube()
-
+                print(f"[DEBUG] Detected Plex Show → open_plex({title})")
+                self.open_plex(url, title)
+            elif "youtube.com" in url or "youtu.be" in url:
+                print(f"[DEBUG] Detected YouTube Show → open_youtube({title})")
+                self.open_youtube(url, title)
             elif "paramountplus.com/live-tv" in url:
-                print(f"[DEBUG] Detected Paramount+ Live TV. Using open_and_click() for {title}.")
+                print(f"[DEBUG] Detected Paramount+ Live TV → open_and_click({title})")
                 self.open_and_click(title, url)
-
             elif "pluto.tv" in url:
-                print(f"[DEBUG] Detected Pluto TV Show. Using open_pluto() for {title}.")
-                self.open_pluto(title, url)  # 🔥 FIXED ARGUMENT ORDER
-
+                print(f"[DEBUG] Detected Pluto.tv Show → open_pluto({title})")
+                self.open_pluto(title, url)
+            elif "amazon.com" in url:
+                print(f"[DEBUG] Detected Amazon Show → open_and_click({title})")
+                self.open_and_click(title, url)
             else:
-                print(f"[DEBUG] Non-Plex Show. Using open_in_chrome() for {title}")
-                self.open_in_chrome(title, url)  # Default for other platforms
+                print(f"[DEBUG] Non-Plex Show → open_in_chrome({title})")
+                self.open_in_chrome(title, url)
 
-            # ✅ Start tracking changes to `last_watched.json`
-            MenuFrame.active_show = title
-            threading.Thread(target=self.save_current_url, args=(title, url), daemon=True).start()
-
-        # ✅ Live TV handling
         elif content_type == "live":
             if "paramountplus.com/live-tv" in url:
-                print(f"[DEBUG] Detected Paramount+ Live TV. Using open_and_click() for {title}.")
+                print(f"[DEBUG] Detected Paramount+ Live Stream → open_and_click({title})")
                 self.open_and_click(title, url)
-
             elif "pluto.tv" in url:
-                print(f"[DEBUG] Detected Pluto TV Live Stream. Using open_pluto() for {title}.")
-                self.open_pluto(title, url)  # 🔥 FIXED ARGUMENT ORDER
-
-            elif "youtube.com" in url or "youtu.be" in url:  # 🔥 FIX: Ensure YouTube Live uses open_youtube()
-                print(f"[DEBUG] Detected YouTube Live Stream. Using open_youtube() for {title}.")
-                self.open_youtube(url, title)  # ✅ Always use open_youtube()
-
+                print(f"[DEBUG] Detected Pluto.tv Live Stream → open_pluto({title})")
+                self.open_pluto(title, url)
+            elif "youtube.com" in url or "youtu.be" in url:
+                print(f"[DEBUG] Detected YouTube Live Stream → open_youtube({title})")
+                self.open_youtube(url, title)
+            elif "amazon.com" in url:
+                print(f"[DEBUG] Detected Amazon Live → open_and_click({title})")
+                self.open_and_click(title, url)
             else:
-                print(f"[DEBUG] Detected General Live Content. Using open_in_chrome() for {title}")
-                self.open_in_chrome(title, url)  # Default method for other live content
+                print(f"[DEBUG] General Live Content → open_in_chrome({title})")
+                self.open_in_chrome(title, url)
 
-        # ✅ Movies and other non-show content
         elif content_type == "movies":
             if "plex.tv" in url:
-                print(f"[DEBUG] Detected Plex Movie. Using open_plex_movies() for {title}")
-                self.open_plex_movies(url, title)  # Plex-specific opening for movies
+                print(f"[DEBUG] Detected Plex Movie → open_plex_movies({title})")
+                self.open_plex_movies(url, title)
+            elif "amazon.com" in url:
+                print(f"[DEBUG] Detected Amazon Movie → open_and_click({title})")
+                self.open_and_click(title, url)
             else:
-                print(f"[DEBUG] Detected Other Movie Content. Using movies_in_chrome() for {title}")
-                self.movies_in_chrome(title, url)  # General method for movies
+                print(f"[DEBUG] Other Movie Content → movies_in_chrome({title})")
+                self.movies_in_chrome(title, url)
 
-        # ✅ Music Handling
         elif content_type == "music":
             if "spotify.com" in url:
-                print(f"[DEBUG] Detected Spotify URL. Using open_spotify() for {title}")
+                print(f"[DEBUG] Detected Spotify → open_spotify({title})")
                 self.open_spotify(url)
             else:
-                print(f"[DEBUG] Detected Other Music Source. Using open_in_chrome() for {title}")
-                self.open_in_chrome(title, url)  # Default for other music services
+                print(f"[DEBUG] Other Music Source → open_in_chrome({title})")
+                self.open_in_chrome(title, url)
 
-        # ✅ Audiobooks Handling
         elif content_type == "audiobooks":
             if "plex.tv" in url:
-                print(f"[DEBUG] Detected Plex Movie. Using open_plex_movies() for {title}")
-                self.open_plex_movies(url, title)  # Plex-specific opening for movies
+                print(f"[DEBUG] Detected Plex Audiobook → open_plex_movies({title})")
+                self.open_plex_movies(url, title)
             else:
-                print(f"[DEBUG] Detected Other Movie Content. Using movies_in_chrome() for {title}")
-                self.movies_in_chrome(title, url)  # General method for movies
+                print(f"[DEBUG] Other Audiobook Source → movies_in_chrome({title})")
+                self.movies_in_chrome(title, url)
 
-        # ✅ Default case (failsafe)
         else:
-            print(f"[DEBUG] Unknown content type '{content_type}'. Defaulting to movies_in_chrome().")
-            self.movies_in_chrome(title, url)  # Default fallback
+            print(f"[DEBUG] Unknown content type '{content_type}' → movies_in_chrome({title})")
+            self.movies_in_chrome(title, url)
 
 import sys
 
@@ -1088,45 +1129,52 @@ class MainMenuPage(MenuFrame):
 class CommunicationPageMenu(MenuFrame):
     def __init__(self, parent):
         super().__init__(parent, "Communication")
-        buttons = [
-            ("Back", lambda: parent.show_frame(MainMenuPage), None),
-            ("Basic", lambda: parent.show_frame(BasicPageMenu), "Basic"),
-            ("Keyboard", self.open_keyboard_app, "Keyboard"),
-        ]
-        self.create_button_grid(buttons)
+        self.phrases_by_category = load_communication_phrases()
+        self.categories = sorted(self.phrases_by_category.keys())
+        self.page = 0
+        self.page_size = 14  # back + keyboard + up to 14 categories = 16 buttons max
+        self.load_buttons()
 
+    def load_buttons(self):
+        start = self.page * self.page_size
+        end = start + self.page_size
+        current_cats = self.categories[start:end]
+
+        buttons = [
+            ("Back", lambda: self.parent.show_frame(MainMenuPage), "Back"),
+            ("Keyboard", self.open_keyboard_app, "Keyboard")
+        ]
+        for cat in current_cats:
+            buttons.append((cat, lambda c=cat: self.parent.show_frame(lambda p: CommunicationCategoryMenu(p, c, self.phrases_by_category[c])), cat))
+
+        if end < len(self.categories):
+            buttons.append(("Next", self.next_page, "Next Page"))
+
+        self.create_button_grid(buttons, columns=4)
+
+    def next_page(self):
+        self.page += 1
+        self.load_buttons()
 
     def open_keyboard_app(self):
-        """Closes the current app and opens the KeyboardFrameApp."""
         try:
-            # Get the path to the `keyboard_frame_app` script
-            script_name = "keyboard.py"  # Ensure the file is in the same directory
+            script_name = "keyboard.py"
             script_path = os.path.join(os.path.dirname(__file__), "keyboard", script_name)
-
-            # Open the keyboard app
             subprocess.Popen([sys.executable, script_path])
-
-            # Close the current app
             self.master.destroy()
         except Exception as e:
-            print(f"Failed to open keyboard application: {e}")
+            print(f"Failed to open keyboard: {e}") 
 
-
-class BasicPageMenu(MenuFrame):
-    def __init__(self, parent):
-        super().__init__(parent, "Basic")
+class CommunicationCategoryMenu(MenuFrame):
+    def __init__(self, parent, category_name, phrase_list):
+        super().__init__(parent, category_name)
         buttons = [
-            ("Back", lambda: self.parent.show_frame(CommunicationPageMenu), None),  # Add Back button
-            ("Yes", lambda: None, "Yes"),
-            ("No", lambda: None, "No"),
-            ("IDK", lambda: None, "I Don't Know"),
-            ("Maybe", lambda: None, "Maybe"),
-            ("Explain", lambda: None, "Can you explain more?"),
-            ("Thank", lambda: None, "Thank you"),
-            ("Sick", lambda: None, "I don't feel good."),
-            ("Break", lambda: None, "I need a break"),
+            ("Back", lambda: parent.show_frame(CommunicationPageMenu), "Back")
         ]
-        self.create_button_grid(buttons)        
+        for label, speak_text in phrase_list:
+            buttons.append((label, lambda t=speak_text: speak(t), speak_text))
+        self.create_button_grid(buttons, columns=3)
+
 
 import subprocess
 import pyautogui
