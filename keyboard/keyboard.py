@@ -167,6 +167,8 @@ class KeyboardFrame(tk.Frame):
             font=("Arial Black", 72),
             bg="light blue",
             command=self.read_text_tts,
+            wraplength=1368,  # Adjust this value as needed for your layout
+            justify="left"   # This will align wrapped lines to the left
         )
         self.text_bar_button.grid(row=0, column=0, columnspan=6, sticky="nsew")
 
@@ -322,9 +324,11 @@ class KeyboardFrame(tk.Frame):
 
     def read_predictive_tts(self):
         """
-        Reads aloud a fixed message "Predictive Text" when the predictive row is highlighted.
+        Reads each suggestion in the predictive text row aloud.
         """
-        self.tts_engine.say("Predictive Text")
+        for word in self.predictive_text_row:
+            if word.strip():  # Skip empty placeholders
+                self.tts_engine.say(word.lower())  # lowercase avoids spelling letters
         self.tts_engine.runAndWait()
 
     def stop_selecting(self, event):
@@ -537,7 +541,8 @@ class KeyboardFrame(tk.Frame):
     def speak_button_label(self, button_index):
         """Speak the label of the current button."""
         label = self.rows[self.current_row_index - 1][button_index]
-        self.tts_engine.say(label)
+        # Convert label to lowercase to avoid TTS spelling out short words
+        self.tts_engine.say(label.lower())
         self.tts_engine.runAndWait()
         
     def handle_button_press(self, char):

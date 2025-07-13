@@ -93,6 +93,7 @@ def compute_freq_score(data):
 def get_predictive_suggestions(text, num_suggestions=6):
     """
     Returns a list of predictive suggestions based on the current text input.
+    This version favors recently used rolling trigrams (and bigrams) over frequent words.
     """
     # Check if the text (without the "|" cursor marker) ends with a space.
     has_trailing_space = text.rstrip("|").endswith(" ")
@@ -111,79 +112,75 @@ def get_predictive_suggestions(text, num_suggestions=6):
             if len(word) >= 2:
                 score = compute_freq_score(data)
                 default_predictions.append((word, score))
-
-        # Sort by frequency
         sorted_default = sorted(default_predictions, key=lambda x: -x[1])
-
-        # Take the top results
-        final_predictions = [word for word, _ in sorted_default[:num_suggestions]]
-
-        # Ensure "YES, NO, HELP" appear **at the end**
-        for default_word in DEFAULT_WORDS:
-            if default_word not in final_predictions:
-                final_predictions.append(default_word)
-
-        # Truncate to the max number of suggestions
+        final_predictions = [w for w, _ in sorted_default[:num_suggestions]]
+        for w in DEFAULT_WORDS:
+            if w not in final_predictions:
+                final_predictions.append(w)
         return final_predictions[:num_suggestions]
 
-    # --- Otherwise, proceed with normal prediction logic ---
-
-    # Determine context and current (incomplete) word.
+    # --- Determine context and current (incomplete) word ---
     if has_trailing_space:
         context = cleaned
         current_word = ""
     else:
         current_word = words[-1]
-        context = " ".join(words[:-1])  # May be empty if only one word exists.
+        context = " ".join(words[:-1])
 
-    # --- Tier 1: N-gram predictions ---
+    # --- Tier 1: N-gram predictions with rolling trigrams ---
     predictions_ngram = {}
     if context and (has_trailing_space or context != current_word):
-        for ngram_type in ["trigrams", "bigrams"]:
-            for key, data in predictive_data.get(ngram_type, {}).items():
-                if key.startswith(context + " "):
-                    key_words = key.split()
-                    context_words = context.split()
-                    if len(key_words) > len(context_words):
-                        candidate = key_words[len(context_words)]
-                        if (current_word == "" or candidate.startswith(current_word)) and len(candidate) >= 2 and data.get("count", 0) >= 1:
-                            score = compute_ngram_score(data, ngram_type, candidate, current_word)
-                            predictions_ngram[candidate] = predictions_ngram.get(candidate, 0) + score
+        ctx_words = context.split()
 
-    # --- Tier 2: Frequent words completions ---
+        # rolling contexts
+        tri_ctx = " ".join(ctx_words[-2:]) if len(ctx_words) >= 2 else context
+        bi_ctx  = ctx_words[-1]           if len(ctx_words) >= 1 else ""
+
+        # look up trigrams using only the last two words
+        for key, data in predictive_data.get("trigrams", {}).items():
+            if key.startswith(tri_ctx + " "):
+                next_word = key.split()[-1]
+                if (current_word == "" or next_word.startswith(current_word)) \
+                   and len(next_word) >= 2 and data.get("count", 0) >= 1:
+                    score = compute_ngram_score(data, "trigrams", next_word, current_word)
+                    predictions_ngram[next_word] = predictions_ngram.get(next_word, 0) + score
+
+        # fallback to bigrams on the very last word
+        for key, data in predictive_data.get("bigrams", {}).items():
+            if key.startswith(bi_ctx + " "):
+                next_word = key.split()[-1]
+                if (current_word == "" or next_word.startswith(current_word)) \
+                   and len(next_word) >= 2 and data.get("count", 0) >= 1:
+                    score = compute_ngram_score(data, "bigrams", next_word, current_word)
+                    predictions_ngram[next_word] = predictions_ngram.get(next_word, 0) + score
+
+    # --- Tier 2: Frequent word completions ---
     predictions_freq = {}
     for word, data in predictive_data.get("frequent_words", {}).items():
         if word.startswith(current_word) and word != current_word and len(word) >= 2:
             score = compute_freq_score(data)
             predictions_freq[word] = score
 
-    # --- Tier 3: Combine candidates ---
-    combined_predictions = {}
-    # Merge ngram predictions and frequent word predictions
-    for word, score in predictions_ngram.items():
-        combined_predictions[word] = score
-    for word, score in predictions_freq.items():
-        if word in combined_predictions:
-            combined_predictions[word] += score
-        else:
-            combined_predictions[word] = score
+    # --- Tier 3: Combine candidates (n-grams first, then freq, then defaults) ---
+    final_predictions = []
 
-    # Sort predictions by their scores
-    sorted_combined = sorted(combined_predictions.items(), key=lambda x: -x[1])
-    final_predictions = [word for word, _ in sorted_combined]
+    if predictions_ngram:
+        for w, _ in sorted(predictions_ngram.items(), key=lambda x: -x[1]):
+            final_predictions.append(w)
 
-    # If there are fewer than num_suggestions predictions, add additional frequent words that match the current word
     if len(final_predictions) < num_suggestions:
-        additional = [word for word in predictions_freq.keys() if word not in final_predictions]
-        final_predictions.extend(additional)
+        for w, _ in sorted(predictions_freq.items(), key=lambda x: -x[1]):
+            if w not in final_predictions:
+                final_predictions.append(w)
+            if len(final_predictions) >= num_suggestions:
+                break
 
-    # Ensure default words ("YES", "NO", "HELP") are appended if they're not already included
-    for default_word in DEFAULT_WORDS:
-        if default_word not in final_predictions:
-            final_predictions.append(default_word)
+    for w in DEFAULT_WORDS:
+        if w not in final_predictions:
+            final_predictions.append(w)
 
-    # Return exactly num_suggestions predictions
     return final_predictions[:num_suggestions]
+
 
 def update_word_usage(text):
     # Remove the cursor indicator from the text.
@@ -191,16 +188,15 @@ def update_word_usage(text):
     words = text.strip().upper().split()
     timestamp = datetime.now().isoformat()
 
-    # Update frequent words
+    # Update frequent words without a length restriction.
     for word in words:
-        if len(word) <= 9:
-            if word in predictive_data["frequent_words"]:
-                predictive_data["frequent_words"][word]["count"] += 1
-                predictive_data["frequent_words"][word]["last_used"] = timestamp
-            else:
-                predictive_data["frequent_words"][word] = {"count": 1, "last_used": timestamp}
+        if word in predictive_data["frequent_words"]:
+            predictive_data["frequent_words"][word]["count"] += 1
+            predictive_data["frequent_words"][word]["last_used"] = timestamp
+        else:
+            predictive_data["frequent_words"][word] = {"count": 1, "last_used": timestamp}
 
-    # Update bigrams
+    # Update bigrams.
     for i in range(len(words) - 1):
         bigram = f"{words[i]} {words[i+1]}"
         if bigram in predictive_data["bigrams"]:
@@ -209,7 +205,7 @@ def update_word_usage(text):
         else:
             predictive_data["bigrams"][bigram] = {"count": 1, "last_used": timestamp}
 
-    # Update trigrams
+    # Update trigrams.
     for i in range(len(words) - 2):
         trigram = f"{words[i]} {words[i+1]} {words[i+2]}"
         if trigram in predictive_data["trigrams"]:
