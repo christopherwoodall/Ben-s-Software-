@@ -1,3 +1,5 @@
+# © 2025 NARBE House – Licensed under CC BY-NC 4.0
+
 import json
 import os
 from datetime import datetime
