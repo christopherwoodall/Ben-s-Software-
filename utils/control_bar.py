@@ -1001,7 +1001,6 @@ class ControlBar(tk.Tk):
             label = self.tk_buttons[idx].cget("text")
             say = None
 
-            # NEW: speak when scanning to volume buttons
             if bid == "vol_down":
                 say = "volume down"
             elif bid == "vol_up":
@@ -1421,6 +1420,33 @@ class ControlBar(tk.Tk):
                 pass
         self._refocus_bar()
 
+    # NEW: toggle in-player fullscreen safely (CDP preferred, OS fallback)
+    def on_fullscreen_toggle(self):
+        self._speak("fullscreen")
+        ws = cdp_find_ws(self._last_url_hint())
+        done = False
+        if ws and websocket:
+            try:
+                w = websocket.create_connection(ws, timeout=0.8)
+                try:
+                    # Try in-page toggle via 'f' (universal across platforms)
+                    _cdp_send(w, "Input.dispatchKeyEvent", {"type": "keyDown", "key": "f", "code": "KeyF", "windowsVirtualKeyCode": 0x46, "keyCode": 0x46})
+                    _cdp_send(w, "Input.dispatchKeyEvent", {"type": "keyUp", "key": "f", "code": "KeyF", "windowsVirtualKeyCode": 0x46, "keyCode": 0x46})
+                    done = True
+                finally:
+                    try: w.close()
+                    except Exception: pass
+            except Exception:
+                done = False
+        if not done:
+            if focus_chrome_window():
+                try:
+                    win32api.keybd_event(0x46, 0, 0, 0)  # 'F'
+                    win32api.keybd_event(0x46, 0, 2, 0)
+                except Exception:
+                    pass
+        self._refocus_bar()
+
     def on_mute_toggle(self):
         # ...existing code (unused now; safe to keep or remove)...
         pass
@@ -1499,11 +1525,14 @@ class ControlBar(tk.Tk):
                 play_vk = 0x4B if (prof and prof.get("name", "").lower() == "youtube") else 0x20  # 'K' or Space
                 win32api.keybd_event(play_vk, 0, 0, 0)
                 win32api.keybd_event(play_vk, 0, 2, 0)
-                time.sleep(0.1)
+                time.sleep(0.18)
 
-                # Send fullscreen 'F'
-                win32api.keybd_event(0x46, 0, 0, 0)
-                win32api.keybd_event(0x46, 0, 2, 0)
+                # Send fullscreen 'F' a couple of times to catch late player init
+                for _ in range(2):
+                    win32api.keybd_event(0x46, 0, 0, 0)
+                    win32api.keybd_event(0x46, 0, 2, 0)
+                    time.sleep(0.18)
+
                 played_fullscreen = True
             except Exception:
                 played_fullscreen = False
@@ -1511,6 +1540,23 @@ class ControlBar(tk.Tk):
         # Immediately reclaim focus for the control bar
         self._refocus_for(1.5)
         return played_fullscreen
+
+    # NEW: one-shot ensure fullscreen (used after launch to re-assert)
+    def _ensure_fullscreen_once(self, prof: PlatformProfile):
+        try:
+            ws = cdp_find_ws(self._last_url_hint())
+            if ws:
+                cdp_ensure_play_and_fullscreen(ws)
+                return
+        except Exception:
+            pass
+        if focus_chrome_window():
+            try:
+                win32api.keybd_event(0x46, 0, 0, 0)
+                win32api.keybd_event(0x46, 0, 2, 0)
+            except Exception:
+                pass
+        self._refocus_bar()
 
     def _switch_to_index(self, new_index: int):
         if not self._has_episode_selector():
@@ -1557,7 +1603,7 @@ class ControlBar(tk.Tk):
             exe = _find_chrome_exe()
             if exe:
                 try:
-                    subprocess.Popen([exe, "--new-window", url])
+                    subprocess.Popen([exe, "--new-window", "--start-fullscreen", url])
                 except Exception:
                     # Fallback without --new-window
                     subprocess.Popen([exe, url])
@@ -1579,6 +1625,9 @@ class ControlBar(tk.Tk):
             except Exception:
                 ok = False
             self._refocus_bar()
+            # Always schedule an extra fullscreen ensure shortly after first pass
+            if attempt == 0:
+                self.after(1000, lambda: self._ensure_fullscreen_once(prof))
             # Retry more times with small backoff if the player/page isn't ready yet
             if attempt < 4 and not ok:
                 delay_ms = 1200 + attempt * 500
