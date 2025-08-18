@@ -77,18 +77,6 @@ The project is shared openly to inspire others to build similar accessibility to
 
 ---
 
-## Flowchart
-
-```mermaid
-flowchart TD
-    A[shows.xlsx] -->|Marathon Mode| B[last_watched.json<br>(auto progress)]
-    A -->|Linked Show| C[EPISODE_SELECTION.xlsx<br>(seasons & episodes)]
-    C --> D[Direct episode navigation]
-    E[communication.xlsx] --> F[Quick Phrases in Keyboard]
-````
-
----
-
 ## Installation
 
 ```bash
@@ -162,3 +150,4 @@ This is more than just one program.
 It’s an **open-source example** of how AI + caregiving can create **accessible, personalized tools** for people with severe disabilities.
 
 We hope it inspires others to build and share similar projects.
+
