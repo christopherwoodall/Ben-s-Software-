@@ -18,30 +18,39 @@ import os
 import logging
 import requests
 import win32api
+import sys  # ensure available for control bar launcher
+
+# ADD: control bar launcher
+CONTROL_BAR_PATH = os.path.join(os.path.dirname(__file__), "utils", "control_bar.py")
+
+def launch_control_bar(mode="basic", show_title=None):
+    try:
+        cmd = [sys.executable, CONTROL_BAR_PATH, "--mode", mode]
+        if mode == "episodes" and show_title:
+            cmd += ["--show", show_title]
+        subprocess.Popen(cmd, shell=False)
+        print(f"[CONTROL-BAR] launched: {cmd}")
+    except Exception as e:
+        print(f"[CONTROL-BAR] failed to launch: {e}")
+
+# ADD: global stop event for all background loops
+STOP_EVENT = threading.Event()
 
 def monitor_app_focus(app_title="Accessible Menu"):
-    """Continuously monitor Chrome's state and ensure the application is maximized and focused."""
-    while True:
+    # Make loop stoppable and stop touching the window once it's gone
+    while not STOP_EVENT.is_set():
         try:
-            # Check if Chrome is running
             if not is_chrome_running():
-                print("Chrome is not running. Ensuring application is maximized and in focus.")
-                
                 hwnd = win32gui.FindWindow(None, app_title)
-                if hwnd:
-                    # Restore and maximize the application window
-                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # Ensure it's not minimized
-                    win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)  # Maximize the window
-                    win32gui.SetForegroundWindow(hwnd)  # Bring it to the foreground
-                    print("Application is maximized and in focus.")
-                else:
-                    print(f"Application window with title '{app_title}' not found.")
-            else:
-                print("Chrome is running. Application can remain minimized or in the background.")
+                if not hwnd:
+                    break  # window no longer exists; stop this loop
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+                win32gui.SetForegroundWindow(hwnd)
+            # else: do NOTHING
         except Exception as e:
             print(f"Error in monitor_app_focus: {e}")
-        
-        time.sleep(2)  # Adjust the monitoring frequency as needed
+        time.sleep(2)
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,33 +66,25 @@ def minimize_terminal():
         except Exception as e:
             print(f"Error minimizing terminal: {e}")
 
-# Function to minimize the app when Chrome is open
 def monitor_and_minimize(app):
-    """Continuously monitor for Chrome activity and minimize the Tkinter app if restored."""
-    while True:
+    while not STOP_EVENT.is_set():
         try:
             active_window, _ = get_active_window_name()
-
-            # Check if Chrome is the active window
-            if "Chrome" in active_window or "Google Chrome" in active_window:
-                print("Chrome detected. Minimizing the app.")
-                app.iconify()  # Minimize the Tkinter window
-
-            # Check if the app is restored and Chrome is still open
-            if app.state() == "normal" and ("Chrome" in active_window or "Google Chrome" in active_window):
-                print("App restored while Chrome is open. Minimizing again.")
-                app.iconify()
-
+            if is_chrome_running():
+                if app.state() == "normal" or "Accessible Menu" in active_window:
+                    app.iconify()
+            else:
+                if app.state() == "iconic":
+                    pass  # don't automatically restore unless you want to
         except Exception as e:
-            print(f"Error in monitor_and_minimize: {e}")
-        time.sleep(1)  # Adjust frequency of checks if needed
+            print(f"monitor_and_minimize error: {e}")
+        time.sleep(1)
 
-import psutil
+from psutil import process_iter
 
 def is_chrome_running():
-    """Check if any Chrome process is running."""
-    for process in psutil.process_iter(['name']):
-        if process.info['name'] and 'chrome' in process.info['name'].lower():
+    for p in process_iter(['name']):
+        if p.info['name'] and 'chrome' in p.info['name'].lower():
             return True
     return False
         
@@ -118,7 +119,7 @@ def is_start_menu_open():
 
 def monitor_start_menu():
     """Continuously check and close the Start Menu if it is open."""
-    while True:
+    while not STOP_EVENT.is_set():
         try:
             # Check if the Start Menu is active
             if is_start_menu_open():
@@ -145,7 +146,7 @@ def log_window_titles():
         print(f"Window title: {title}")
         
 def log_active_window_title():
-    while True:
+    while not STOP_EVENT.is_set():
         try:
             active_window, _ = get_active_window_name()
             print(f"Active window: {active_window}")
@@ -327,75 +328,147 @@ def load_communication_phrases(file_path="communication.xlsx"):
             phrases_by_category[category].append((label, speak_text))
     return phrases_by_category
 
-class KeySequenceListener:
-    def __init__(self, app):
-        self.app = app
-        self.sequence = ["enter", "enter", "enter"]  # Define the key sequence
-        self.current_index = 0
-        self.last_key_time = None
-        self.timeout = 8 # Timeout for completing the sequence (seconds)
-        self.held_keys = set()  # Track keys that are currently held
-        self.recently_pressed = set()  # To debounce key presses
-        self.start_listener()
+# === EPISODE SELECTION SUPPORT ===
+EPISODE_SHEET_NAME = "EPISODE_SELECTION.xlsx"  # trigger value in shows.xlsx "url" for shows
+EPISODE_CACHE = {}  # { show_title_lower: { season_number: [ {Episode Title, Episode URL, Season Number, Episode Number}, ... ] } }
 
-    def start_listener(self):
-        def on_press(key):
-            try:
-                key_name = (
-                    key.char.lower() if hasattr(key, 'char') and key.char else str(key).split('.')[-1].lower()
-                )
-                if key_name in self.recently_pressed:  # Ignore key if already recently pressed
-                    return
+def load_episode_catalog():
+    """
+    Load/refresh the EPISODE_SELECTION.xlsx once and cache by show+season.
+    Expected columns (case-insensitive):
+        Show Title | Season Number | Episode Number | Episode Title | DisneyPlusURL (or Episode URL)
+    """
+    import pandas as pd
+    import os
+    from pathlib import Path
 
-                self.recently_pressed.add(key_name)
-                self.check_key(key_name)
-            except AttributeError:
-                pass
+    base_dir = os.path.join(os.path.dirname(__file__), "data")
+    sheet_path = Path(base_dir) / EPISODE_SHEET_NAME
+    if not sheet_path.exists():
+        print(f"[EPISODES] Not found: {sheet_path}")
+        return
 
-        def on_release(key):
-            try:
-                key_name = (
-                    key.char.lower() if hasattr(key, 'char') and key.char else str(key).split('.')[-1].lower()
-                )
-                self.recently_pressed.discard(key_name)  # Allow key to be pressed again
-            except AttributeError:
-                pass
+    df = pd.read_excel(sheet_path)
+    cols = {c.lower().strip(): c for c in df.columns}
 
-        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-        listener.start()
+    show_col   = cols.get("show title") or cols.get("show") or cols.get("title") or cols.get("series")
+    season_col = cols.get("season number") or cols.get("season")
+    episode_col= cols.get("episode number") or cols.get("episode")
+    title_col  = cols.get("episode title") or cols.get("title")
+    url_col    = cols.get("disneyplusurl") or cols.get("episode url") or cols.get("url")
 
-    def check_key(self, key_name):
-        # Handle timeout for the sequence
-        if self.last_key_time and time.time() - self.last_key_time > self.timeout:
-            print("Sequence timeout. Resetting index.")
-            self.current_index = 0  # Reset sequence on timeout
+    if not (show_col and season_col and episode_col and title_col and url_col):
+        print("[EPISODES] Missing expected columns in EPISODE_SELECTION.xlsx")
+        return
 
-        self.last_key_time = time.time()
+    EPISODE_CACHE.clear()
+    for _, row in df.iterrows():
+        show = str(row[show_col]).strip()
+        if not show:
+            continue
+        s_num = pd.to_numeric(row[season_col], errors="coerce")
+        e_num = pd.to_numeric(row[episode_col], errors="coerce")
+        if pd.isna(s_num) or pd.isna(e_num):
+            continue
+        s_num = int(s_num); e_num = int(e_num)
+        title = str(row[title_col]).strip()
+        url   = str(row[url_col]).strip() if pd.notna(row[url_col]) else ""
 
-        # Check the current key against the sequence
-        if key_name == self.sequence[self.current_index]:
-            print(f"Matched {key_name} at index {self.current_index}")
-            self.current_index += 1  # Move to the next key in the sequence
-            if self.current_index == len(self.sequence):  # Full sequence detected
-                self.handle_sequence()
-                self.current_index = 0  # Reset sequence index
-        else:
-            print(f"Key mismatch or invalid input. Resetting sequence.")
-            self.current_index = 0  # Reset on invalid input
+        key = show.lower()
+        EPISODE_CACHE.setdefault(key, {}).setdefault(s_num, []).append({
+            "Show Title": show,
+            "Season Number": s_num,
+            "Episode Number": e_num,
+            "Episode Title": title,
+            "Episode URL": url
+        })
 
-    def handle_sequence(self):
-        print("Key sequence detected. Closing Chrome and focusing application.")
-        threading.Thread(target=self.perform_actions, daemon=True).start()
+    for show_key, seasons in EPISODE_CACHE.items():
+        for s in seasons:
+            seasons[s].sort(key=lambda r: r["Episode Number"])
+    print(f"[EPISODES] Loaded shows: {len(EPISODE_CACHE)} from {sheet_path}")
 
-    def perform_actions(self):
-        close_chrome_cleanly()
+def get_show_seasons(show_title):
+    key = show_title.lower()
+    return sorted(EPISODE_CACHE.get(key, {}).keys())
 
-        # Introduce a delay before resuming scanning/selecting
-        print("Adding delay before resuming scanning/selecting...")
-        time.sleep(2)  # Delay in seconds; adjust as needed
+def get_season_episodes(show_title, season_number):
+    key = show_title.lower()
+    return list(EPISODE_CACHE.get(key, {}).get(season_number, []))
 
-        bring_application_to_focus()
-            
+def get_last_position(show_title):
+    data = load_last_watched()
+    rec = data.get(show_title)
+    if isinstance(rec, dict):
+        return rec.get("season"), rec.get("episode"), rec.get("url") or ""
+    elif isinstance(rec, str):
+        return None, None, rec
+    return None, None, ""
+
+def set_last_position(show_title, season, episode, url):
+    data = load_last_watched()
+    data[show_title] = {"season": int(season), "episode": int(episode), "url": url}
+    save_last_watched(data)
+    print(f"[SAVE] {show_title} → S{season:02d}E{episode:02d} ({url})")
+
+def shrink_button_font(button, max_width_px=250, min_pt=18, base_pt=32, family="Arial Black"):
+    from tkinter.font import Font
+    text = button.cget("text")
+    pt = base_pt
+    while pt >= min_pt:
+        f = Font(family=family, size=pt)
+        if f.measure(text) <= max_width_px:
+            break
+        pt -= 2
+    button.config(font=(family, pt))
+
+# ADD: unified, safe shutdown for all threads and resources
+def graceful_exit(app):
+    try:
+        STOP_EVENT.set()  # signal loops to end
+
+        # stop key listener if present
+        try:
+            if hasattr(app, "sequencer"):
+                app.sequencer.stop()
+        except Exception:
+            pass
+
+        # stop TTS thread
+        try:
+            speak_queue.put(None)  # sentinel for play_speak_queue
+        except Exception:
+            pass
+        try:
+            engine.stop()
+        except Exception:
+            pass
+
+        # let daemon loops see the stop signal
+        time.sleep(0.2)
+
+        # destroy Tk cleanly
+        try:
+            app.update_idletasks()
+            app.destroy()
+        except Exception:
+            pass
+
+        # force a desktop repaint to clear any ghost
+        try:
+            user32 = ctypes.windll.user32
+            hwnd_desktop = user32.GetDesktopWindow()
+            RDW_INVALIDATE = 0x0001
+            RDW_ALLCHILDREN = 0x0080
+            RDW_UPDATENOW   = 0x0100
+            user32.RedrawWindow(hwnd_desktop, None, None,
+                                RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW)
+        except Exception:
+            pass
+    finally:
+        # ensure process ends even if some non-daemon thread lingers
+        os._exit(0)
+
 import ctypes
 import pyautogui
 from pynput.keyboard import Controller
@@ -437,16 +510,14 @@ class App(tk.Tk):
         # Delay key bindings to ensure focus
         self.after(3000, self.bind_keys_for_scanning)
 
-        # Focus Application
-        self.after(7000, self.force_focus, bring_application_to_focus())
-        self.after(9000, lambda: pyautogui.click(x=25, y=25))
-
-
         self.menu_stack = []
 
         # Initialize the main menu
         print("Initializing the main menu...")
         self.show_frame(MainMenuPage)
+
+        # Bind window close to graceful shutdown
+        self.protocol("WM_DELETE_WINDOW", lambda: graceful_exit(self))
 
     def force_focus(self):
         self.focus_force()
@@ -468,7 +539,8 @@ class App(tk.Tk):
 
         close_button = tk.Button(
             control_frame, text="Close", bg="red", fg="white",
-            command=self.destroy, font=("Arial", 12)
+            # Use graceful_exit to avoid ghosted window artifacts
+            command=lambda: graceful_exit(self), font=("Arial", 12)
         )
         close_button.pack(side="right", padx=5, pady=5)
 
@@ -484,26 +556,26 @@ class App(tk.Tk):
         self.bind("<KeyRelease-Return>", self.select_button)
         print("Key bindings activated.")
 
-
-        # Start key sequence listener
-        self.sequencer = KeySequenceListener(self)
-
         # Start spacebar hold tracking in a separate thread
         threading.Thread(target=self.monitor_spacebar_hold, daemon=True).start()
 
     def monitor_spacebar_hold(self):
-        while True:
+        while not STOP_EVENT.is_set():
             if self.spacebar_pressed and (time.time() - self.start_time >= 3.5):
                 self.long_spacebar_pressed = True
                 self.scan_backward()
                 time.sleep(self.backward_time_delay)
 
     def track_spacebar_hold(self, event):
+        if is_chrome_running():
+            return  # Disable spacebar when Chrome is open
         if not self.spacebar_pressed and not self.long_spacebar_pressed:
             self.spacebar_pressed = True
             self.start_time = time.time()
 
     def reset_spacebar_hold(self, event):
+        if is_chrome_running():
+            return  # Disable spacebar when Chrome is open
         if self.spacebar_pressed:
             self.spacebar_pressed = False
             if not self.long_spacebar_pressed:
@@ -532,15 +604,17 @@ class App(tk.Tk):
             self.current_frame = previous_factory(self)
             self.current_frame.pack(expand=True, fill="both")
             self.current_frame_factory = previous_factory
-            self.buttons = self.current_frame.buttons
+            self.buttons = self.current_frame.buttonsnippn
             self.current_button_index = 0
             if self.buttons:
                 self.highlight_button(0)
         else:
             self.show_frame(MainMenuPage)
 
-    def scan_forward(self, event=None):
-        """Advance to the next button and highlight it upon spacebar release."""
+    def scan_forward(self):
+        if not self.selection_enabled:
+            return
+        # existing scanning logic here      
         if not self.selection_enabled or not self.buttons:
             return
         self.selection_enabled = False  # Disable selection temporarily
@@ -551,7 +625,8 @@ class App(tk.Tk):
         # Speak the button's text if the frame matches
         if isinstance(self.current_frame, (
             MainMenuPage, EntertainmentMenuPage, SettingsMenuPage,
-            LibraryMenu, GamesPage, CommunicationPageMenu
+            LibraryMenu, GamesPage, CommunicationPageMenu,
+            SeasonPickerMenu, EpisodeListMenu
         )):
             speak(self.buttons[self.current_button_index]["text"])
 
@@ -570,7 +645,8 @@ class App(tk.Tk):
         # Speak the button's text if the frame matches
         if isinstance(self.current_frame, (
             MainMenuPage, EntertainmentMenuPage,  SettingsMenuPage,
-            LibraryMenu, GamesPage, CommunicationPageMenu
+            LibraryMenu, GamesPage, CommunicationPageMenu,
+            SeasonPickerMenu, EpisodeListMenu
           
         )):
             speak(self.buttons[self.current_button_index]["text"])
@@ -591,9 +667,6 @@ class App(tk.Tk):
 
             # Add delay for both scanning and selection after Enter key
             threading.Timer(2, self.enable_selection).start()  # Re-enable selection after 2 seconds
-
-            self.sequencer.current_index = 0
-            self.sequencer.last_key_time = None
 
     def highlight_button(self, index):
         for i, btn in enumerate(self.buttons):
@@ -631,11 +704,17 @@ class MenuFrame(tk.Frame):
         self.create_title()
 
     def create_title(self):
-        label = tk.Label(self, text=self.title, font=("Arial", 36), bg="black", fg="white")
-        label.pack(pady=20)
+        # CHANGED: keep a handle to the title for clean redraws
+        self.title_label = tk.Label(self, text=self.title, font=("Arial", 36), bg="black", fg="white")
+        self.title_label.pack(pady=20)
+
+    def clear_content(self):
+        """Remove old grids/frames but keep the title label."""
+        for child in self.winfo_children():
+            if child is not getattr(self, "title_label", None):
+                child.destroy()
 
     def create_button_grid(self, buttons, columns=3):
-        # Create a frame for the grid directly inside this MenuFrame.
         grid_frame = tk.Frame(self, bg="black")
         grid_frame.pack(expand=True, fill="both", padx=10, pady=10)
 
@@ -957,6 +1036,13 @@ class MenuFrame(tk.Frame):
         MenuFrame.active_show = title
         print(f"[DEBUG] Active show set → {MenuFrame.active_show}")
 
+        # NEW: route to season picker UX when url == EPISODE_SELECTION.xlsx
+        if content_type == "shows" and str(url).strip().lower() == EPISODE_SHEET_NAME.lower():
+            if not EPISODE_CACHE:
+                load_episode_catalog()
+            self.parent.show_frame(lambda p: SeasonPickerMenu(p, title))  # ← go straight to seasons
+            return
+
         # 2) For shows, overlay with last-watched URL if available
         if content_type == "shows":
             last = load_last_watched()
@@ -998,7 +1084,7 @@ class MenuFrame(tk.Frame):
                 self.open_pluto(title, url)
             elif "youtube.com" in url or "youtu.be" in url:
                 print(f"[DEBUG] Detected YouTube Live Stream → open_youtube({title})")
-                self.open_youtube(url, title)
+                self.open_youtube(title, url)
             elif "amazon.com" in url:
                 print(f"[DEBUG] Detected Amazon Live → open_and_click({title})")
                 self.open_and_click(title, url)
@@ -1036,6 +1122,22 @@ class MenuFrame(tk.Frame):
         else:
             print(f"[DEBUG] Unknown content type '{content_type}' → movies_in_chrome({title})")
             self.movies_in_chrome(title, url)
+
+        # ADD: launch control bar in basic mode for normal links (episodes flow returns earlier)
+        launch_control_bar("basic")
+
+    def goto_shows_root(self):
+        """Jump to the root Shows menu sourced from shows.xlsx."""
+        data = self.parent.organized_links.get("shows", {})
+        self.parent.show_frame(lambda p: LibraryMenu(p, data, "genre", parent_key="shows"))
+
+    def resync_app_scanner(self, focus_first=True):
+        """Point the App-level scanner at this frame's current buttons."""
+        self.parent.buttons = self.buttons
+        if focus_first:
+            self.parent.current_button_index = 0
+        if self.parent.buttons:
+            self.parent.highlight_button(self.parent.current_button_index)
 
 import sys
 
@@ -1498,13 +1600,14 @@ class LibraryMenu(MenuFrame):
 
         button_list = []
 
-        # Determine the Back button command.
-        # If we're not on the first page, the Back button will go to the previous page;
-        # otherwise, it returns to the previous (Entertainment) menu.
+        # --- Decide what Back should do ---
         if self.page > 0:
             back_command = self.previous_page
         else:
-            back_command = lambda: self.parent.show_previous_menu()
+            if self.level == "genre" and (self.parent_key or "").lower() == "shows":
+                back_command = lambda: self.parent.show_frame(EntertainmentMenuPage)
+            else:
+                back_command = lambda: self.parent.show_previous_menu()
 
         back_btn = tk.Button(
             self.container,
@@ -1513,7 +1616,7 @@ class LibraryMenu(MenuFrame):
             bg="light blue",
             fg="black",
             command=back_command,
-            wraplength=700,  # Allow wrapping into two lines if needed
+            wraplength=700,
             justify="center"
         )
         button_list.append(back_btn)
@@ -1615,6 +1718,157 @@ class LibraryMenu(MenuFrame):
                 if entry["title"] == key:
                     self.open_link(entry)
                     break
+
+# === 3×3 EPISODE MENUS ===
+class SeasonPickerMenu(MenuFrame):
+    """
+    Season pager with strict 3x3 layout:
+      - Page 0: Back, Continue, up to 6 seasons, Next (if overflow)
+      - Page >0: Back, up to 7 seasons, Next (if overflow)
+    """
+    def __init__(self, parent, show_title):
+        super().__init__(parent, f"{show_title} – Select Season")
+        self.show_title = show_title
+        self.page = 0
+        self._reload()
+
+    def _page_sizing(self):
+        if self.page == 0:
+            seasons_per_page = 6
+            base_offset = 0
+        else:
+            seasons_per_page = 7
+            base_offset = 6 + (self.page - 1) * 7
+        return seasons_per_page, base_offset
+
+    def _back(self):
+        """Back: go to previous page if not on first; else go to Shows root."""
+        if self.page > 0:
+            self.page -= 1
+            self._reload()
+        else:
+            self._back_to_root()
+
+    def _reload(self):
+        self.parent.selection_enabled = False  # debounce during rebuild
+        seasons = get_show_seasons(self.show_title)
+        seasons_per_page, base_offset = self._page_sizing()
+        subset = seasons[base_offset: base_offset + seasons_per_page]
+        has_next = (base_offset + seasons_per_page) < len(seasons)
+
+        self.clear_content()
+        # CHANGED: Back is page-aware (previous page or Shows root)
+        buttons = [("Back", self._back, "Back")]
+        if self.page == 0:
+            buttons.append(("Continue", self._do_continue, "Continue"))
+        for s in subset:
+            buttons.append(
+                (f"Season {s}",
+                 lambda ss=s: self.parent.show_frame(lambda p: EpisodeListMenu(p, self.show_title, season_number=ss)),
+                 f"Season {s}")
+            )
+        if has_next:
+            buttons.append(("Next", self._next, "Next"))
+        self.create_button_grid(buttons, columns=3)
+        for b in self.buttons:
+            shrink_button_font(b)
+        self.resync_app_scanner()
+        self.after(50, self.parent.enable_selection)
+
+    def _next(self):
+        self.page += 1
+        self._reload()
+
+    def _do_continue(self):
+        # Use last_watched.json; if a URL exists, open it immediately.
+        s, e, url = get_last_position(self.show_title)
+        if url:
+            self.open_in_chrome(self.show_title, url, persistent=False)
+            # ADD: overlay in episodes mode
+            launch_control_bar("episodes", self.show_title)
+            return
+
+        # If we only have season/episode numbers, try to resolve URL from cache.
+        if s is not None and e is not None:
+            eps = get_season_episodes(self.show_title, int(s))
+            target = next((ep for ep in eps if ep["Episode Number"] == int(e)), None)
+            if target and target.get("Episode URL"):
+                set_last_position(self.show_title, target["Season Number"], target["Episode Number"], target["Episode URL"])
+                self.open_in_chrome(self.show_title, target["Episode URL"], persistent=False)
+                # ADD: overlay in episodes mode
+                launch_control_bar("episodes", self.show_title)
+                return
+            # ...existing fallback...
+
+        # ...existing code...
+
+    def _back_to_root(self):
+        """Always go back to the root Shows page (from shows.xlsx)."""
+        self.goto_shows_root()
+
+class EpisodeListMenu(MenuFrame):
+    """3x3 grid: Back, up to 7 episodes, Next. On select: open URL and save last watched."""
+    def __init__(self, parent, show_title, season_number, start_from_episode=None):
+        super().__init__(parent, f"{show_title} – Season {season_number}")
+        self.show_title = show_title
+        self.season_number = season_number
+        self.episodes = get_season_episodes(show_title, season_number)
+        self.page = 0
+        self.page_size = 7  # Back + 7 + (Next) = 9 max
+        if start_from_episode:
+            idx = max(0, next((i for i, ep in enumerate(self.episodes) if ep["Episode Number"] >= int(start_from_episode)), 0))
+            self.page = idx // self.page_size
+        self._reload()
+
+    def _back(self):
+        """If not on first page, go to previous page; else return to season picker."""
+        if self.page > 0:
+            self.page -= 1
+            self._reload()
+        else:
+            self.parent.show_frame(lambda p: SeasonPickerMenu(p, self.show_title))
+
+    def _reload(self):
+        self.parent.selection_enabled = False  # debounce during rebuild
+        start = self.page * self.page_size
+        end = start + self.page_size
+        subset = self.episodes[start:end]
+        has_next = end < len(self.episodes)
+
+        # Rebuild grid from scratch
+        self.clear_content()
+
+        # CHANGED: Back now uses _back()
+        buttons = [("Back", self._back, "Back")]
+
+        for ep in subset:
+            label = f"E{ep['Episode Number']:02d} – {ep['Episode Title']}"
+            buttons.append((label, lambda e=ep: self._play(e), label))
+
+        if has_next:
+            buttons.append(("Next", self._next, "Next"))
+
+        self.create_button_grid(buttons, columns=3)
+        for b in self.buttons:
+            shrink_button_font(b)
+
+        # ADD: resync scanner and re-enable selection shortly after
+        self.resync_app_scanner()
+        self.after(50, self.parent.enable_selection)
+
+    def _next(self):
+        self.page += 1
+        self._reload()
+
+    def _play(self, ep):
+        url = ep.get("Episode URL") or ""
+        if not url:
+            speak("No URL for this episode.")
+            return
+        set_last_position(self.show_title, ep["Season Number"], ep["Episode Number"], url)
+        self.open_in_chrome(self.show_title, url, persistent=False)
+        # ADD: overlay in episodes mode when an episode starts
+        launch_control_bar("episodes", self.show_title)
 
 # Run the App
 if __name__ == "__main__":
