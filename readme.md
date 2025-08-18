@@ -1,11 +1,11 @@
-Got it 👍 — here’s the full **README.md** written clean, ready for you to copy and paste directly into your GitHub repo:
 
 ````markdown
 # Ben's Accessibility Software
 
-⚠️ **Disclaimer:** This project was created by a caregiver with no formal programming background.  
-Most of the code was generated with **AI assistance (ChatGPT)** and refined through testing.  
-It is **not professional-grade software**, but an **open-source example** of what families and caregivers can achieve using AI to build bespoke accessibility tools.  
+> ⚠️ **Disclaimer**  
+> This project was created by a caregiver with no formal programming background.  
+> Most of the code was generated with **AI assistance (ChatGPT)** and refined through testing.  
+> It is **not professional-grade software**, but an **open-source example** of what families and caregivers can achieve using AI to build bespoke accessibility tools.  
 
 ---
 
@@ -13,7 +13,8 @@ It is **not professional-grade software**, but an **open-source example** of wha
 
 This project was developed for **Ben**, who lives with **TUBB4A-related Leukodystrophy (H-ABC)** and uses only two switches (head left/right) to interact with his computer.  
 
-It gives Ben the ability to:  
+It gives Ben the ability to:
+
 - Communicate using a **robust predictive text keyboard**  
 - Speak **quick communication phrases** from a customizable list  
 - Watch and navigate his favorite shows and movies  
@@ -27,24 +28,27 @@ The project is shared openly to inspire others to build similar accessibility to
 
 ## Features
 
-### 🔤 Predictive Text Keyboard (`keyboard/keyboard.py`)
+### Predictive Text Keyboard (`keyboard/keyboard.py`)
+
 - Custom-built predictive text engine (developed by hand, not AI-generated)  
 - Optimized for **scan-and-select navigation** with two switches  
 - Supports **quick phrases** (`data/communication.xlsx`)  
 - Text-to-Speech (TTS) for all typed content  
 - Includes Spanish keyboard variant (`keyboard/spanish/`)  
 
-### 🖥️ Main Communication Hub (`comm-v10.py`)
+### Main Communication Hub (`comm-v10.py`)
+
 - Central interface with scanning menus  
 - Integrated **emergency, settings, communication, and entertainment** menus  
 - Auto-hides when Chrome is active, restores after closing  
 
-### 🎬 Entertainment
+### Entertainment
+
 - **Show Tracking**  
   - `data/shows.xlsx` → Master list of favorite shows  
   - Two playback modes:  
-    1. **Marathon Mode** → Most shows run continuously, tracked via `last_watched.json`  
-    2. **Episode Selection Mode** → Some shows link to `EPISODE_SELECTION.xlsx` for season/episode navigation  
+    - **Marathon Mode** → Most shows run continuously, tracked via `last_watched.json`  
+    - **Episode Selection Mode** → Some shows link to `EPISODE_SELECTION.xlsx` for season/episode navigation  
 
 - **Supported Platforms**  
   - Plex (best navigation, supports media keys)  
@@ -56,7 +60,8 @@ The project is shared openly to inspire others to build similar accessibility to
   - Always-on-top playback bar over Chrome  
   - Play/Pause, Volume, Previous/Next Episode, Exit  
 
-### 🎮 Games (`games/`)
+### Games (`games/`)
+
 - `Concentration.py` → Memory game  
 - `TicTacToe.py` → Classic tic tac toe  
 - `WordJumble.py` → Word scramble  
@@ -65,11 +70,13 @@ The project is shared openly to inspire others to build similar accessibility to
 - `baseball.py` → Probability-based baseball with animations  
 - `Trivia.py` → Pulls questions from `trivia_questions.xlsx`  
 
-### 🗨️ Communication Phrases
+### Communication Phrases
+
 - Stored in `data/communication.xlsx`  
 - Customizable with new phrases for fast TTS playback  
 
-### ⚙️ System Controls
+### System Controls
+
 - Emergency alert  
 - Volume up/down  
 - Sleep timer (set/cancel)  
@@ -91,7 +98,7 @@ pip install -r requirements.txt
 
 # Run the main software
 python comm-v10.py
-```
+````
 
 ---
 
@@ -151,3 +158,9 @@ It’s an **open-source example** of how AI + caregiving can create **accessible
 
 We hope it inspires others to build and share similar projects.
 
+```
+
+---
+
+Would you like me to also add a **table of contents with anchor links** (so GitHub auto-generates clickable section links), or keep it minimal?
+```
