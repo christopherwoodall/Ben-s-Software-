@@ -1151,21 +1151,19 @@ class ControlBar(tk.Tk):
     # removed: _return_hold_loop (no longer needed)
 
     # ---------- Housekeeping ----------
+    # UPDATED: do not destroy the bar if Chrome is not running
     def _watch_chrome(self):
         while True:
             time.sleep(POLL_INTERVAL)
-            running = is_chrome_running()
-            if not running:
-                # If we are intentionally restarting Chrome, wait until it comes back or deadline passes
-                if getattr(self, "_restarting_chrome", False):
-                    if time.time() <= getattr(self, "_restart_deadline", 0.0):
-                        continue
-                    # Timed out while waiting for restart; fall through and close the bar
-                try:
-                    self.destroy()
-                except Exception:
-                    pass
+            if not self.winfo_exists():
                 break
+            running = is_chrome_running()
+            # If we are intentionally restarting Chrome, just wait (no action needed here)
+            if getattr(self, "_restarting_chrome", False):
+                # Let the restart window elapse; _switch_to_index clears the guard
+                continue
+            # Previously this destroyed the bar when Chrome wasn't running. Keep the bar alive.
+            # Optional: we could auto-raise here if desired, but _raise_forever already handles it.
 
     def _raise_forever(self):
         if not self.winfo_exists():
@@ -1427,22 +1425,181 @@ class ControlBar(tk.Tk):
         # ...existing code (unused now; safe to keep or remove)...
         pass
 
-    def _apply_post_nav(self, prof: PlatformProfile):
-        # Ensure playback & fullscreen via CDP without stealing focus
-        ws = cdp_find_ws(self._last_url_hint())
-        if ws:
-            cdp_ensure_play_and_fullscreen(ws)
-
+    # ADDED: Exit handler used by the Exit button
     def on_exit(self):
-        close_chrome()
-        deadline = time.time() + 5
-        while time.time() < deadline and is_chrome_running():
-            time.sleep(0.2)
-        focus_comm_app()
+        try:
+            close_chrome()
+            deadline = time.time() + 5
+            while time.time() < deadline and is_chrome_running():
+                time.sleep(0.2)
+        except Exception:
+            pass
+        try:
+            focus_comm_app()
+        except Exception:
+            pass
         try:
             self.destroy()
         except Exception:
             pass
+
+    def _apply_post_nav(self, prof: PlatformProfile) -> bool:
+        # Ensure playback & fullscreen. Prefer CDP; fallback to OS focus/click/keys.
+        ok = False
+        ws = cdp_find_ws(self._last_url_hint())
+        if ws:
+            try:
+                ok = cdp_ensure_play_and_fullscreen(ws)
+            except Exception:
+                ok = False
+        if ok:
+            return True
+
+        # Fallback path: focus Chrome, click the center of the Chrome window, run platform post_nav, press play, then fullscreen.
+        played_fullscreen = False
+        if focus_chrome_window():
+            try:
+                time.sleep(0.2)
+
+                # Click inside Chrome window center (more reliable than screen center)
+                try:
+                    hwnd = win32gui.GetForegroundWindow()
+                    l, t, r, b = win32gui.GetWindowRect(hwnd)
+                    cx, cy = max(0, (l + r) // 2), max(0, (t + b) // 2)
+                    pyautogui.click(cx, cy)
+                except Exception:
+                    # Fallback: screen center
+                    sw, sh = pyautogui.size()
+                    pyautogui.click(sw // 2, sh // 2)
+                time.sleep(0.12)
+
+                # Helper: map simple keys to VK codes
+                def _vk_for(k: str) -> Optional[int]:
+                    if not k:
+                        return None
+                    k = k.lower()
+                    if k in ("enter", "return"):
+                        return 0x0D
+                    if k in ("space",):
+                        return 0x20
+                    if len(k) == 1 and "a" <= k <= "z":
+                        return ord(k.upper())
+                    return None
+
+                # Run platform post-nav sequence first (e.g., Plex)
+                for key in (prof.get("post_nav") or []):
+                    vk = _vk_for(str(key))
+                    if vk is None:
+                        continue
+                    win32api.keybd_event(vk, 0, 0, 0)
+                    win32api.keybd_event(vk, 0, 2, 0)
+                    time.sleep(0.06)
+
+                # Decide play key by platform (YouTube prefers 'K', others 'Space')
+                play_vk = 0x4B if (prof and prof.get("name", "").lower() == "youtube") else 0x20  # 'K' or Space
+                win32api.keybd_event(play_vk, 0, 0, 0)
+                win32api.keybd_event(play_vk, 0, 2, 0)
+                time.sleep(0.1)
+
+                # Send fullscreen 'F'
+                win32api.keybd_event(0x46, 0, 0, 0)
+                win32api.keybd_event(0x46, 0, 2, 0)
+                played_fullscreen = True
+            except Exception:
+                played_fullscreen = False
+
+        # Immediately reclaim focus for the control bar
+        self._refocus_for(1.5)
+        return played_fullscreen
+
+    def _switch_to_index(self, new_index: int):
+        if not self._has_episode_selector():
+            return
+        key = self.show_title.lower()
+        arr = EPISODE_LINEAR.get(key, [])
+        if not arr or new_index < 0 or new_index >= len(arr):
+            return
+
+        rec = arr[new_index]
+        url = (rec.get("Episode URL") or "").strip()
+        if not url:
+            return
+
+        try:
+            s = int(rec.get("Season Number"))
+            e = int(rec.get("Episode Number"))
+        except Exception:
+            s = rec.get("Season Number")
+            e = rec.get("Episode Number")
+
+        # Persist selection and update local index + labels immediately
+        self._linear_idx = new_index
+        set_last_position(self.show_title, int(s), int(e), url, linear_index=new_index)
+        self._update_prev_next_labels()
+
+        # Platform profile for optional post-nav
+        explicit_platform = rec.get("Platform")
+        prof = get_profile_for_url(url, explicit_platform)
+
+        # Tell watcher we're intentionally restarting Chrome
+        self._restarting_chrome = True
+        self._restart_deadline = time.time() + 12.0  # allow time for shutdown + relaunch
+
+        # Close Chrome (best-effort), wait briefly for exit
+        close_chrome()
+        deadline = time.time() + 5.0
+        while time.time() < deadline and is_chrome_running():
+            time.sleep(0.2)
+
+        # Launch Chrome with the target URL (new window preferred)
+        launched = False
+        try:
+            exe = _find_chrome_exe()
+            if exe:
+                try:
+                    subprocess.Popen([exe, "--new-window", url])
+                except Exception:
+                    # Fallback without --new-window
+                    subprocess.Popen([exe, url])
+                launched = True
+            else:
+                os.startfile(url)
+                launched = True
+        except Exception:
+            launched = False
+
+        # Schedule cleanup of restart guard once Chrome is back or after grace period
+        def _clear_restart_guard():
+            self._restarting_chrome = False
+            self._restart_deadline = 0.0
+        def _wait_then_post(attempt: int = 0):
+            # wait a moment for page to load, then apply post-nav and refocus
+            try:
+                ok = self._apply_post_nav(prof)
+            except Exception:
+                ok = False
+            self._refocus_bar()
+            # Retry more times with small backoff if the player/page isn't ready yet
+            if attempt < 4 and not ok:
+                delay_ms = 1200 + attempt * 500
+                self.after(delay_ms, lambda: _wait_then_post(attempt + 1))
+            else:
+                _clear_restart_guard()
+
+        # Keep the bar on top and focused during this transition
+        self._refocus_bar()
+        self._refocus_for(2.0)
+
+        if launched:
+            # Reset first-press activation so Play/Pause will center-click next time
+            self._activated_once = False
+            # Light UI refresh (re-highlight current button)
+            self.after(50, lambda: self._highlight(self.current_index))
+            # Give Chrome a moment to start and load the URL, then post actions (with retries)
+            self.after(1500, _wait_then_post)
+        else:
+            # Could not launch; just clear guard sooner and refocus
+            self.after(500, _clear_restart_guard)
 
 # ------------------------------ Main ------------------------------
 
