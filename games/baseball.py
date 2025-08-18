@@ -108,8 +108,18 @@ class BaseballGame:
         self.menu_text_items = []
         self.last_return_press_time = None
 
+        self.last_space_scan_time = 0
+        self.spacebar_held = False
+        self.spacebar_hold_thread = None
+        self.spacebar_auto_scan_active = False
+        self.spacebar_hold_start = 0
+
+        self.last_pitch_type = None
+        self.same_pitch_count = 0
+
         self.root.bind("<KeyPress-Return>", self.on_return_press)
         self.root.bind("<KeyRelease-Return>", self.on_return_release)
+        self.root.bind("<KeyPress-space>", self.on_space_press)
         self.root.bind("<KeyRelease-space>", self.on_space_release)
         self.setup_main_menu()
 
@@ -123,6 +133,8 @@ class BaseballGame:
         self.current_balls = 0
         self.current_strikes = 0
         self.first_pitch = True
+        self.last_pitch_type = None
+        self.same_pitch_count = 0
 
     def force_focus(self):
         try:
@@ -199,7 +211,7 @@ class BaseballGame:
         self.draw_menu_bases()
 
         self.menu_options = ["Play Game", "Exit Game"]
-        self.selection_index = 0
+        self.selection_index = -1
         self.menu_text_items = []
         opt_font = ("Arial", int(25 * self.base_scale))
         for i, opt in enumerate(self.menu_options):
@@ -241,13 +253,64 @@ class BaseballGame:
             color = "yellow" if i == self.selection_index else "black"
             self.canvas.itemconfig(item, fill=color)
 
+    def on_space_press(self, event):
+        if not self.spacebar_held:
+            self.spacebar_held = True
+            self.spacebar_hold_start = time.time()
+            self.spacebar_auto_scan_active = False
+            self.spacebar_hold_thread = threading.Thread(target=self._spacebar_hold_check, daemon=True)
+            self.spacebar_hold_thread.start()
+
     def on_space_release(self, event):
+        self.spacebar_held = False
+        if self.spacebar_auto_scan_active:
+            self.spacebar_auto_scan_active = False
+            return  # Do NOT scan on release after auto-scanning
+        now = time.time()
+        if now - self.last_space_scan_time > 1.5:
+            self.last_space_scan_time = now
+            self._perform_space_scan()
+
+    def _spacebar_hold_check(self):
+        while self.spacebar_held:
+            held_duration = time.time() - self.spacebar_hold_start
+            if not self.spacebar_auto_scan_active and held_duration > 2:
+                self.spacebar_auto_scan_active = True
+                self._auto_scan_loop()
+                break
+            time.sleep(0.05)
+
+    def _auto_scan_loop(self):
+        while self.spacebar_held:
+            now = time.time()
+            if now - self.last_space_scan_time > 1.5:
+                self.last_space_scan_time = now
+                self._perform_space_scan()
+            time.sleep(0.05)
+
+    def _perform_space_scan(self):
+        # Main menu and pause menu
         if self.current_mode in ["main_menu", "pause_menu"]:
             self.selection_index = (self.selection_index + 1) % len(self.menu_options)
             self.highlight_menu_option()
             self.speak(self.menu_options[self.selection_index])
+        # Swing menu (batting_selection)
+        elif self.current_mode == "batting_selection" and hasattr(self, "swing_buttons"):
+            if not hasattr(self, "swing_index") or self.swing_index is None:
+                self.swing_index = 0
+            else:
+                self.swing_index = (self.swing_index + 1) % len(self.swing_buttons)
+            self.update_swing_highlight()
+            self.speak(self.swing_buttons[self.swing_index]['text'])
+        # Pitch menu (pitch_selection)
+        elif self.current_mode == "pitch_selection" and hasattr(self, "pitch_buttons"):
+            if not hasattr(self, "pitch_index") or self.pitch_index is None:
+                self.pitch_index = 0
+            else:
+                self.pitch_index = (self.pitch_index + 1) % len(self.pitch_buttons)
+            self.update_pitch_highlight()
+            self.speak(self.pitch_buttons[self.pitch_index]['text'])
 
- # ---------- Modified Return Key Handlers ----------
     def on_return_press(self, event):
         """ Starts timing when Return is pressed. """
         if self.last_return_press_time is None:
@@ -278,19 +341,26 @@ class BaseballGame:
                 self.show_pause_menu()
 
     def handle_main_menu_selection(self):
+        if self.selection_index == -1:
+            return  # Do nothing if nothing is selected
         sel = self.menu_options[self.selection_index]
         if sel == "Play Game":
             self.reset_game_state()
             self.start_gameplay()
         elif sel == "Exit Game":
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            comm_v9_path = os.path.join(current_dir, "..", "comm-v9.py")
+            comm_v9_path = os.path.join(current_dir, "..", "comm-v10.py")
             subprocess.Popen(["python", comm_v9_path])
             self.root.quit()
             quit()
               
     def show_pause_menu(self):
-        # Save the current mode (which might be "batting_selection" or "pitch_selection")
+        # Temporarily disable root's space/return handling
+        self.root.unbind("<KeyPress-space>")
+        self.root.unbind("<KeyRelease-space>")
+        self.root.unbind("<KeyPress-Return>")
+        self.root.unbind("<KeyRelease-Return>")
+
         self.previous_mode = self.current_mode
         self.current_mode = "pause_menu"
         self.pause_window = tk.Toplevel(self.root)
@@ -315,29 +385,28 @@ class BaseballGame:
             btn.pack(pady=20, fill="x")
             self.pause_buttons.append(btn)
 
-        self.pause_window.bind("<KeyRelease-space>", self.on_pause_space)
+        # Bind toplevel events to handlers that update pause_index and highlight
+        self.pause_window.bind("<KeyRelease-space>", self.on_pause_space_release)
         self.pause_window.bind("<KeyRelease-Return>", self.on_pause_return)
         self.pause_window.focus_force()
 
-    def on_pause_space(self, event):
-        """ Navigate the pause menu without auto-highlighting on open. """
+    def on_pause_space_release(self, event):
+        # Scan through pause menu options *on release*
         if self.pause_index == -1:
-            self.pause_index = 0  # Start selection when space is first pressed
+            self.pause_index = 0
         else:
             self.pause_index = (self.pause_index + 1) % len(self.pause_buttons)
-        
         self.update_pause_highlight()
         self.speak(self.pause_buttons[self.pause_index]['text'])
 
     def update_pause_highlight(self):
-        """ Updates the highlighted button in the pause menu. """
         for i, btn in enumerate(self.pause_buttons):
             btn.config(bg="yellow" if i == self.pause_index else "SystemButtonFace")
 
     def on_pause_return(self, event):
-        """ Prevents selection if no option has been highlighted. """
-        if self.pause_index != -1:
-            self.pause_buttons[self.pause_index].invoke()
+        if self.pause_index == -1:
+            return
+        self.pause_buttons[self.pause_index].invoke()
 
     def pause_menu_select(self, selection):
         try:
@@ -345,6 +414,12 @@ class BaseballGame:
         except Exception as e:
             print("Error releasing grab:", e)
         self.pause_window.destroy()
+
+        # Restore root key bindings after pause menu closes
+        self.root.bind("<KeyPress-Return>", self.on_return_press)
+        self.root.bind("<KeyRelease-Return>", self.on_return_release)
+        self.root.bind("<KeyPress-space>", self.on_space_press)
+        self.root.bind("<KeyRelease-space>", self.on_space_release)
 
         if selection == "Continue Game":
             # Clean up any lingering interactive frames
@@ -533,12 +608,12 @@ class BaseballGame:
             self.swing_frame.destroy()
 
         self.swing_frame = tk.Frame(self.root, bg="lightgray")
-        self.swing_frame.place(relx=0.05, rely=0.40, relwidth=0.2, relheight=0.5)
+        self.swing_frame.place(relx=0.05, relwidth=0.2, relheight=0.5, rely=0.40)
         # Base options for swinging.
         self.menu_options = ["Normal Swing", "Power Swing", "Hold", "Bunt"]
         if self.bases.get("first") and not self.bases.get("second"):
             self.menu_options.append("Steal 2nd Base")
-        if self.bases.get("second"):
+        if self.bases.get("second") and not self.bases.get("third"):
             self.menu_options.append("Steal 3rd Base")
         
         self.swing_buttons = []
@@ -553,19 +628,17 @@ class BaseballGame:
         self.update_swing_highlight()
         # Force focus so its key bindings are active.
         self.swing_frame.focus_force()
-        self.swing_frame.bind("<KeyRelease-space>", self.on_swing_space)
+        self.swing_frame.bind("<KeyPress-space>", self.on_space_press)
+        self.swing_frame.bind("<KeyRelease-space>", self.on_space_release)
         self.swing_frame.bind("<KeyRelease-Return>", self.on_swing_return)
 
     def update_swing_highlight(self):
         for i, btn in enumerate(self.swing_buttons):
             btn.config(bg="yellow" if i == self.swing_index else "SystemButtonFace")
 
-    def on_swing_space(self, event):
-        self.swing_index = (self.swing_index + 1) % len(self.swing_buttons)
-        self.update_swing_highlight()
-        self.speak(self.swing_buttons[self.swing_index]['text'])
-
     def on_swing_return(self, event):
+        if self.swing_index == -1:
+            return  # Do nothing if nothing is highlighted
         self.swing_buttons[self.swing_index].invoke()
 
     def process_batting_selection(self, selected):
@@ -576,7 +649,8 @@ class BaseballGame:
 
         if selected in ["Steal 2nd Base", "Steal 3rd Base"]:
             if selected == "Steal 2nd Base":
-                if random.uniform(0, 100) < 25:
+                # 50% success rate
+                if random.uniform(0, 100) < 50:
                     outcome = "Steal Success"
                     self.bases["second"] = "user"
                     self.bases["first"] = None
@@ -585,7 +659,8 @@ class BaseballGame:
                     self.outs += 1
                     self.bases["first"] = None
             else:
-                if random.uniform(0, 100) < 15:
+                # 30% success rate
+                if random.uniform(0, 100) < 30:
                     outcome = "Steal Success"
                     self.bases["third"] = "user"
                     self.bases["second"] = None
@@ -596,28 +671,40 @@ class BaseballGame:
             self.speak("Steal " + ("successful." if outcome == "Steal Success" else "failed. Runner is out."))
             terminal = True
         elif selected == "Bunt":
-            outcome = random.choices(["Single", "Ground Out"], weights=[30, 70], k=1)[0]
+            # Determine bunt outcome: 40% chance for a bunt single, 60% for a bunt ground out.
+            outcome = random.choices(["Single", "Ground Out"], weights=[35, 65], k=1)[0]
             terminal = True
-            if outcome == "Single":
-                self.update_bases("Single", batter="user")
-            elif outcome == "Ground Out":
+            if outcome == "Ground Out":
+                self.draw_pitch_marker(self.selected_pitch_location, color="red")
+                baseball_hit.play()  # Play hit sound for bunt ground out
+                # Only advance runners if first base is occupied (chain exists)
+                if self.bases["first"]:
+                    # If there's a runner on second, advance him to third.
+                    if self.bases["second"]:
+                        self.bases["third"] = self.bases["second"]
+                        self.bases["second"] = None
+                    # Advance the runner on first to second.
+                    self.bases["second"] = self.bases["first"]
+                    self.bases["first"] = None
                 self.outs += 1
+            # (The rest of your bunt logic remains unchanged.)
         else:
             if selected == "Hold":
                 outcome = "Ball" if self.selected_pitch_location == "Outside" else ("Ball" if random.uniform(0, 100) <= 60 else "Strike")
             elif selected == "Power Swing":
                 if self.selected_pitch_type == "Fastball":
-                    outcome = self.weighted_choice({"Strike": 60, "Pop Fly Out": 30, "HR": 10})
+                    outcome = self.weighted_choice({"Strike": 60, "Pop Fly Out": 25, "HR": 10, "Foul": 5})
                 else:
-                    outcome = self.weighted_choice({"Strike": 40, "HR": 10, "Pop Fly Out": 20, "Double": 15, "Foul": 15})
+                    outcome = self.weighted_choice({"Strike": 45, "HR": 5, "Pop Fly Out": 25, "Double": 10, "Foul": 15})
             else:
                 outcome = self.simulate_batting(selected, self.selected_pitch_type)
-            
+
             if outcome == "HR":
                 outcome = "Home Run"
-            
+
+            # Set terminal outcomes for base hits.
             terminal = outcome in ["Single", "Double", "Triple", "Home Run", "Walk", "Strike Out", "Pop Fly Out", "Ground Out"]
-            
+
             if outcome == "Foul":
                 if self.current_strikes < 2:
                     self.current_strikes += 1
@@ -625,16 +712,19 @@ class BaseballGame:
                 else:
                     self.speak("Foul.")
                 self.update_batter_counter_display()
+                self.draw_pitch_marker(self.selected_pitch_location, color="red")
                 baseball_hit.play()  # Play hit sound for foul
+
             elif outcome == "Strike":
                 self.current_strikes += 1
                 self.speak(f"Strike {self.current_strikes}.")
                 self.update_batter_counter_display()
-                self.draw_pitch_marker(self.selected_pitch_location, color="red")  # Ensure red indicator shows
+                self.draw_pitch_marker(self.selected_pitch_location, color="red")
                 if self.current_strikes == 3:
                     outcome = "Strike Out"
                     self.outs += 1
                     terminal = True
+
             elif outcome == "Ball":
                 self.current_balls += 1
                 self.speak(f"Ball {self.current_balls}.")
@@ -642,25 +732,43 @@ class BaseballGame:
                 if self.current_balls == 4:
                     outcome = "Walk"
                     terminal = True
+                    # Call update_bases here so that a walk is handled like a single.
+                    self.update_bases("Walk", batter="user")
+                # (If less than 4 balls, do nothing more.)
+
             elif outcome in ["Pop Fly Out", "Ground Out"]:
-                self.outs += 1
-                baseball_hit.play()  # Play hit sound for ground out & pop fly
-                terminal = True
-            elif outcome in ["Single", "Double", "Triple", "Home Run", "Walk"]:
-                if outcome == "Walk":
-                    self.update_bases("Single", batter="user")
+                # If it's a ground out and there is a runner on first, check for a double play.
+                if outcome == "Ground Out" and self.bases.get("first"):
+                    if random.uniform(0, 100) < 50:
+                        outcome = "Double Play"
+                        self.outs += 2
+                        self.bases["first"] = None  # Remove the first base runner.
+                    else:
+                        self.outs += 1
                 else:
-                    self.update_bases(outcome, batter="user")
+                    self.outs += 1
+                baseball_hit.play()  # Play the ground out/pop fly sound.
                 terminal = True
 
-        if outcome in ["Single", "Double", "Triple"]:
-            baseball_hit.play()  # Play sound for any normal hit
-        elif outcome == "Home Run":
-            homerun_sound.play()  # Play the home run sound
+            elif outcome in ["Single", "Double", "Triple"]:
+                # For a normal hit, update bases.
+                baseball_hit.play() 
+                self.update_bases(outcome, batter="user")
+                terminal = True
+
+            elif outcome in ["Home Run"]:
+                homerun_sound.play()  # Play home run sound
+                self.update_bases(outcome, batter="user")
+                terminal = True
 
         self.speak(f"Result of your swing: {outcome}.")
         if terminal:
             self.reset_batter_counter()
+            # For a bunt single, update the bases now using the normal single logic.
+            if selected == "Bunt" and outcome == "Single":
+                self.draw_pitch_marker(self.selected_pitch_location, color="white")
+                baseball_hit.play()  # Play hit sound for foul
+                self.update_bases("Single", batter="user")
             if self.outs >= 3:
                 self.animate_ball_landing(outcome, lambda: self.end_half_inning())
             else:
@@ -669,8 +777,12 @@ class BaseballGame:
             self.root.after(1500, self.continue_at_bat)
 
     def simulate_batting(self, swing, pitch):
-        choices = {"Strike": 40, "Foul": 10, "Pop Fly Out": 10, "Ground Out": 15,
-                   "Single": 20, "Double": 4, "Triple": 1, "HR": 0.5}
+        choices = {"Strike": 45, "Foul": 20, "Pop Fly Out": 10, "Ground Out": 10,
+                   "Single": 13, "Double": 4, "Triple": 2, "HR": 1}
+        if self.half == "top" and self.current_inning >= 7:
+            if (self.score[self.home_team] - self.score[self.away_team]) >= 2:
+                for outcome in ["Single", "Double", "Triple", "HR"]:
+                    choices[outcome] *= 1.3
         return self.weighted_choice(choices)
 
     def weighted_choice(self, choices):
@@ -685,26 +797,38 @@ class BaseballGame:
 
     def update_bases(self, outcome, batter):
         if outcome == "Single":
-            # If there's a runner on third, they score.
+            # Single: shift runners normally.
             if self.bases["third"]:
-                self.score[self.away_team if self.half=="top" else self.home_team] += 1
-            # Shift runners: third gets runner from second, second gets runner from first.
+                self.score[self.away_team if self.half == "top" else self.home_team] += 1
             self.bases["third"] = self.bases["second"]
             self.bases["second"] = self.bases["first"]
-            # Batter takes first base.
+            self.bases["first"] = batter
+        elif outcome == "Walk":
+            # If first base is occupied, force advancement as needed.
+            if self.bases["first"]:
+                # Check if second base is occupied.
+                if self.bases["second"]:
+                    # If second is occupied and third is also occupied, score the runner on third.
+                    if self.bases["third"]:
+                        self.score[self.away_team if self.half == "top" else self.home_team] += 1
+                    # Move the runner from second to third.
+                    self.bases["third"] = self.bases["second"]
+                # Move the runner from first to second.
+                self.bases["second"] = self.bases["first"]
+            # Batter always takes first base.
             self.bases["first"] = batter
         elif outcome == "Double":
             if self.bases["third"]:
-                self.score[self.away_team if self.half=="top" else self.home_team] += 1
+                self.score[self.away_team if self.half == "top" else self.home_team] += 1
             if self.bases["second"]:
-                self.score[self.away_team if self.half=="top" else self.home_team] += 1
+                self.score[self.away_team if self.half == "top" else self.home_team] += 1
             self.bases["third"] = self.bases["first"]
             self.bases["first"] = None
             self.bases["second"] = batter
         elif outcome == "Triple":
             for base in ["first", "second", "third"]:
                 if self.bases[base]:
-                    self.score[self.away_team if self.half=="top" else self.home_team] += 1
+                    self.score[self.away_team if self.half == "top" else self.home_team] += 1
                     self.bases[base] = None
             self.bases["third"] = batter
         elif outcome == "Home Run":
@@ -713,17 +837,18 @@ class BaseballGame:
                 if self.bases[base]:
                     runs += 1
                     self.bases[base] = None
-            if self.half=="top":
+            if self.half == "top":
                 self.score[self.away_team] += runs
             else:
                 self.score[self.home_team] += runs
-        elif outcome == "Walk":
-            # For a walk, simply place the batter on first.
-            self.bases["first"] = batter
+
+        # Immediately update the base display.
+        self.canvas.delete("base")
+        self.draw_bases()
 
     def animate_ball_landing(self, outcome, callback):
         # Outcomes that shouldn't animate
-        no_animation = {"Strike", "Strike Out", "Ball", "Pitch Hit", "Steal Success", "Steal Failed", "Walk"}
+        no_animation = {"Strike", "Strike Out", "Ball", "Steal Success", "Steal Failed", "Walk"}
         if outcome in no_animation:
             callback()
             return
@@ -813,7 +938,7 @@ class BaseballGame:
             self.outs += 1
         if outcome in {"Strike", "Strike Out"}:
             self.draw_pitch_marker(self.selected_pitch_location, color="red")
-        elif outcome in {"Ball", "Pitch Hit"}:
+        elif outcome in {"Ball"}:
             self.draw_pitch_marker(self.selected_pitch_location, color="white")
         self.canvas.delete("base")
         self.draw_bases()
@@ -845,16 +970,19 @@ class BaseballGame:
         # Destroy any existing pitch frame
         if hasattr(self, 'pitch_frame'):
             self.pitch_frame.destroy()
-        self.speak("Choose your pitch.")
         self.wait_for_tts_and_show_pitch()
 
     def show_pitch_menu(self):
+        # Clear the pitcher box before showing the pitch menu.
+        self.canvas.delete("pitch_marker")
+        self.canvas.delete("blue_line")
+        
         # Destroy any existing pitch menu before creating a new one.
         if hasattr(self, "pitch_frame") and self.pitch_frame.winfo_exists():
             self.pitch_frame.destroy()
 
         self.pitch_frame = tk.Frame(self.root, bg="lightgray")
-        self.pitch_frame.place(relx=0.05, rely=0.45, relwidth=0.2, relheight=0.6)
+        self.pitch_frame.place(relx=0.05, relwidth=0.2, relheight=0.6, rely=0.45)
         self.menu_options = ["Fastball", "Curveball", "Slider", "Knuckleball", "Changeup"]
         self.pitch_buttons = []
         self.pitch_index = -1
@@ -867,22 +995,28 @@ class BaseballGame:
             self.pitch_buttons.append(btn)
         self.update_pitch_highlight()
         self.pitch_frame.focus_force()  # Ensure the pitch menu grabs focus
-        self.pitch_frame.bind("<KeyRelease-space>", self.on_pitch_space)
+        self.pitch_frame.bind("<KeyPress-space>", self.on_space_press)
+        self.pitch_frame.bind("<KeyRelease-space>", self.on_space_release)
         self.pitch_frame.bind("<KeyRelease-Return>", self.on_pitch_return)
+        self.speak("Choose your pitch.")
 
     def update_pitch_highlight(self):
         for i, btn in enumerate(self.pitch_buttons):
             btn.config(bg="yellow" if i == self.pitch_index else "SystemButtonFace")
 
-    def on_pitch_space(self, event):
-        self.pitch_index = (self.pitch_index + 1) % len(self.pitch_buttons)
-        self.update_pitch_highlight()
-        self.speak(self.pitch_buttons[self.pitch_index]['text'])
-
     def on_pitch_return(self, event):
+        if self.pitch_index == -1:
+            return  # Do nothing if nothing is highlighted
         self.pitch_buttons[self.pitch_index].invoke()
 
     def process_pitch_selection(self, selected):
+        # Track consecutive pitch type usage (anti-spam)
+        if hasattr(self, "last_pitch_type") and self.last_pitch_type == selected:
+            self.same_pitch_count += 1
+        else:
+            self.same_pitch_count = 1  # new streak
+        self.last_pitch_type = selected
+
         self.selected_pitch_type = selected
         self.pitch_frame.destroy()
         # Instead of letting the player choose pitch location, choose it randomly.
@@ -895,23 +1029,32 @@ class BaseballGame:
         if self.half != "bottom":
             return
 
+        # Clear the pitcher box before each pitch.
         if hasattr(self, 'pitch_frame'):
             self.pitch_frame.destroy()
+        self.canvas.delete("pitch_marker")
+        self.canvas.delete("blue_line")
 
         fatigue = 0
         if pitch_type == "Fastball":
-            strike, ball, hit_prob = (80, 10, 10)
+            strike, ball, hit_prob = (35, 20, 45)
         elif pitch_type == "Curveball":
-            strike, ball, hit_prob = (65, 10, 25)
+            strike, ball, hit_prob = (30, 25, 45)
         elif pitch_type == "Slider":
-            strike, ball, hit_prob = (70, 10, 20)
+            strike, ball, hit_prob = (35, 30, 45)
         elif pitch_type == "Knuckleball":
-            strike, ball, hit_prob = (65, 15, 25)
+            strike, ball, hit_prob = (30, 35, 35)
         elif pitch_type == "Changeup":
-            strike, ball, hit_prob = (58, 12, 32)
+            strike, ball, hit_prob = (40, 22, 38)
         else:
-            strike, ball, hit_prob = (60, 10, 30)
-        
+            strike, ball, hit_prob = (40, 20, 40)
+
+        # ---- Anti-spam logic ----
+        if hasattr(self, "same_pitch_count") and self.same_pitch_count > 2:
+            bonus = 10 * (self.same_pitch_count - 2)
+            hit_prob += bonus
+        # -------------------------
+
         hit_prob += fatigue
         total = strike + ball + hit_prob
         r = random.uniform(0, total)
@@ -921,23 +1064,24 @@ class BaseballGame:
         elif r <= strike + ball:
             outcome = "Ball"
         else:
-            # Updated hit_choices to include pop fly outs and ground outs
             hit_choices = {
                 "Single": 20,
-                "Double": 4,
-                "Triple": 1,
-                "HR": 0.5,
+                "Double": 5,
+                "Triple": 2,
+                "HR": 1,
                 "Pop Fly Out": 10,
-                "Ground Out": 10
+                "Ground Out": 15
             }
             outcome = self.weighted_choice(hit_choices)
             if outcome == "HR":
                 outcome = "Home Run"
 
-        if outcome == "Strike":
+        # Show pitch location marker based on outcome.
+        if outcome in ["Strike", "Foul", "Strike Out", "Pop Fly Out", "Ground Out"]:
             self.draw_pitch_marker(pitch_location, color="red")
-        else:
+        elif outcome in ["Single", "Double", "Triple", "Home Run"]:
             self.draw_pitch_marker(pitch_location, color="white")
+        # (For a Ball, no pitch marker is drawn.)
 
         if outcome == "Foul":
             if self.current_strikes < 2:
@@ -946,8 +1090,8 @@ class BaseballGame:
             else:
                 self.speak("Computer batter foul.")
             self.update_batter_counter_display()
-            baseball_hit.play()  # Play hit sound for foul
-            self.root.after(500, self.wait_for_tts_and_show_pitch)
+            baseball_hit.play()  # Play foul hit sound
+            self.animate_ball_landing("Foul", lambda: self.wait_for_tts_and_show_pitch())
             return
         elif outcome == "Strike":
             self.current_strikes += 1
@@ -968,26 +1112,33 @@ class BaseballGame:
                 return
             else:
                 outcome = "Walk"
-                self.update_bases("Single", batter="comp")
+                self.update_bases("Walk", batter="comp")
         elif outcome in ["Pop Fly Out", "Ground Out"]:
-            self.outs += 1
-            baseball_hit.play()  # Play hit sound for ground out & pop fly
+            # For a ground out, check for a double play if first base is occupied.
+            if outcome == "Ground Out" and self.bases.get("first"):
+                if random.uniform(0, 100) < 50:
+                    outcome = "Double Play"
+                    self.outs += 2
+                    self.bases["first"] = None  # Remove the first base runner.
+                else:
+                    self.outs += 1
+            else:
+                self.outs += 1
+            baseball_hit.play()  # Play the ground out/pop fly sound.
+
         elif outcome in ["Single", "Double", "Triple", "Home Run"]:
             self.update_bases(outcome, batter="comp")
-
         self.reset_batter_counter()
 
         def after_anim():
             self.finish_update(outcome)
             self.speak(f"Result of computer batter: {outcome}.")
 
-        if outcome in ["Single", "Double", "Triple"]:
-            baseball_hit.play()  # Play sound for any normal hit
-        elif outcome == "Home Run":
-            homerun_sound.play()  # Play home run sound
-
-        allowed = {"Single", "Double", "Triple", "Home Run", "Foul", "Pop Fly Out"}
-        if outcome in allowed:
+        if outcome in ["Single", "Double", "Triple", "Home Run", "Foul", "Pop Fly Out"]:
+            if outcome in ["Single", "Double", "Triple"]:
+                baseball_hit.play()  # Play sound for a normal hit
+            elif outcome == "Home Run":
+                homerun_sound.play()  # Play home run sound
             self.animate_ball_landing(outcome, after_anim)
         else:
             after_anim()
@@ -1012,8 +1163,6 @@ class BaseballGame:
             self.outs += 1
         if outcome in {"Strike", "Strike Out"}:
             self.draw_pitch_marker(self.selected_pitch_location, color="red")
-        elif outcome in {"Ball", "Pitch Hit"}:
-            self.draw_pitch_marker(self.selected_pitch_location, color="white")
         self.canvas.delete("base")
         self.draw_bases()
         self.canvas.delete("scoreboard")
@@ -1063,32 +1212,37 @@ class BaseballGame:
         self.canvas.delete("ball_marker")
         self.canvas.delete("blue_line")
 
-        # END GAME CHECK: If it's the bottom of the 9th inning, determine the result
-        if self.current_inning == 9 and self.half == "bottom":
-            if self.score[self.home_team] > self.score[self.away_team]:
-                # Home team (computer) wins
+        # If the half just ended was the top half...
+        if self.half == "top":
+            # In the final inning (or extra innings), if the home team is already ahead,
+            # they win immediately and the bottom half isn’t played.
+            if self.current_inning >= 9 and self.score[self.home_team] > self.score[self.away_team]:
                 self.end_game()
-                return
-            elif self.score[self.home_team] == self.score[self.away_team]:
-                # Game is tied: go to extra innings
-                self.current_inning += 1
-                self.half = "top"
-                self.first_pitch = True
-                self.canvas.delete("scoreboard")
-                self.draw_scoreboard()
-                self.root.after(1000, self.next_play)
                 return
             else:
-                # Away team (player) wins
-                self.end_game()
-                return
-
-        # CONTINUE GAME: Otherwise, switch between top/bottom of innings
-        if self.half == "top":
-            self.half = "bottom"
+                self.half = "bottom"
         else:
-            self.half = "top"
-            self.current_inning += 1
+            # If we just finished a bottom half in the final inning, check the score.
+            if self.current_inning >= 9:
+                if self.score[self.home_team] > self.score[self.away_team]:
+                    self.end_game()
+                    return
+                elif self.score[self.home_team] == self.score[self.away_team]:
+                    # Tie goes to extra innings.
+                    self.current_inning += 1
+                    self.half = "top"
+                    self.first_pitch = True
+                    self.canvas.delete("scoreboard")
+                    self.draw_scoreboard()
+                    self.root.after(1000, self.next_play)
+                    return
+                else:
+                    self.end_game()
+                    return
+            else:
+                # In non-final innings, finish the inning normally.
+                self.half = "top"
+                self.current_inning += 1
 
         self.first_pitch = True
         self.canvas.delete("scoreboard")
