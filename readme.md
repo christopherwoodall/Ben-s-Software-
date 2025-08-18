@@ -160,7 +160,3 @@ We hope it inspires others to build and share similar projects.
 
 ```
 
----
-
-Would you like me to also add a **table of contents with anchor links** (so GitHub auto-generates clickable section links), or keep it minimal?
-```
