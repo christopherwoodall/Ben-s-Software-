@@ -1,70 +1,93 @@
-**there are many duplicate functions in this software yet to be cleaned**
+Got it 👍 — here’s the full **README.md** written clean, ready for you to copy and paste directly into your GitHub repo:
 
+````markdown
 # Ben's Accessibility Software
+
+⚠️ **Disclaimer:** This project was created by a caregiver with no formal programming background.  
+Most of the code was generated with **AI assistance (ChatGPT)** and refined through testing.  
+It is **not professional-grade software**, but an **open-source example** of what families and caregivers can achieve using AI to build bespoke accessibility tools.  
+
+---
 
 ## Overview
 
-This project enhances accessibility for individuals with physical challenges, such as Ben, who has TUBB4a-related Leukodystrophy. Ben uses a two-button system for navigation and communication. This software integrates with his setup to:
+This project was developed for **Ben**, who lives with **TUBB4A-related Leukodystrophy (H-ABC)** and uses only two switches (head left/right) to interact with his computer.  
 
-- Provide scan-and-select capabilities.
-- Open specific links to favorite shows.
-- Include a menu for quick phrases.
-- Track and update URLs dynamically.
-- Offer emergency, settings, communication, and entertainment functions.
-- Consolidate communication features into `keyboard.py`, eliminating the need for a separate communication menu.
+It gives Ben the ability to:  
+- Communicate using a **robust predictive text keyboard**  
+- Speak **quick communication phrases** from a customizable list  
+- Watch and navigate his favorite shows and movies  
+- Play simple games  
+- Access trivia and word challenges  
+- Control his computer with system and emergency functions  
+
+The project is shared openly to inspire others to build similar accessibility tools.  
+
+---
 
 ## Features
 
-### Navigation
+### 🔤 Predictive Text Keyboard (`keyboard/keyboard.py`)
+- Custom-built predictive text engine (developed by hand, not AI-generated)  
+- Optimized for **scan-and-select navigation** with two switches  
+- Supports **quick phrases** (`data/communication.xlsx`)  
+- Text-to-Speech (TTS) for all typed content  
+- Includes Spanish keyboard variant (`keyboard/spanish/`)  
 
-- **Spacebar (Single Press)**: Advances forward by one item.
-- **Spacebar Disable Spacebar in Chrome (Spacebar continuously pauses videos in chrome, this causes issues. Use AutoHotKey with the script "disable_space_chrome.ahk" at Windows Startup to disable)
-- **Spacebar (Held for More Than 3 Seconds)**: Continuously scans backward.
-- **Keyboard Navigation**:
-  - Works similarly to the main navigation.
-  - Holding the `Return` key for more than 3 seconds jumps directly to predictive text for quicker word selection.
+### 🖥️ Main Communication Hub (`comm-v10.py`)
+- Central interface with scanning menus  
+- Integrated **emergency, settings, communication, and entertainment** menus  
+- Auto-hides when Chrome is active, restores after closing  
 
-### Controls
+### 🎬 Entertainment
+- **Show Tracking**  
+  - `data/shows.xlsx` → Master list of favorite shows  
+  - Two playback modes:  
+    1. **Marathon Mode** → Most shows run continuously, tracked via `last_watched.json`  
+    2. **Episode Selection Mode** → Some shows link to `EPISODE_SELECTION.xlsx` for season/episode navigation  
 
-- **Emergency Function**: Triggers an alert for immediate assistance.
-- **Settings Menu**:
-  - Volume Up/Down
-  - Sleep Timer (60 minutes)
-  - Cancel Sleep Timer
-  - Turn Display Off
-  - Lock Computer
-  - Restart Computer
-  - Shut Down Computer
-- **Quick Phrase Method**: Integrated into the keyboard’s layout menu.
-- **Predictive Text**: Allows faster and more intuitive text entry.
-- **Chrome Auto-Close**: Chrome minimizes or closes when needed. To close Chrome using the buttons, press `Enter-Enter-Enter`.
-- **On-Screen Keyboard**:
-  - Includes volume up and volume down button controls.
-  - Predictive text shortcut via long `Return` press.
+- **Supported Platforms**  
+  - Plex (best navigation, supports media keys)  
+  - Netflix, Hulu, Disney+, Paramount+, HBO Max  
+  - YouTube  
+  - Spotify  
 
-### Entertainment
+- **Control Bar (`control_bar.py`)**  
+  - Always-on-top playback bar over Chrome  
+  - Play/Pause, Volume, Previous/Next Episode, Exit  
 
-- **Dynamic Show Tracking**: Automated via `shows.xlsx`. Populate the file with `type`, `genre`, `title`, and `URL`. Works best with:
-  - Plex
-  - Spotify
-  - Netflix
-  - Hulu
-  - Disney+
-  - Paramount+
-  - YouTube
-  - HBO Max
-- **Trivia Mode**:
-  - Pulls trivia data from `trivia_questions.xlsx`.
-  - Populate with `category`, `question`, and `answers`, and the software auto-categorizes.
-- **Games Menu**:
-  - `concentration.py`: A memory game.
-  - `tictactoe.py`: Classic Tic Tac Toe.
-  - `wordjumble.py`: A spelling challenge game.
-  - `towerdefense.py`: A tower defense strategy game
-  - `bensgolf.py`: A mini golf game with Happy Gilmore soundfx.
-  - `baseball.py`: A simple probability baseball game with some graphics/animation.
-  - More games coming soon with Text Adventures and porting a controller for scan/select method to utilize to choose options in choose your own adventure games.
-- **Pause Menu**: Holding down the `Return` key for more than six seconds opens a pause window.
+### 🎮 Games (`games/`)
+- `Concentration.py` → Memory game  
+- `TicTacToe.py` → Classic tic tac toe  
+- `WordJumble.py` → Word scramble  
+- `TowerDefense.py` → Simple tower defense  
+- `MiniGolf.py` → Mini golf with sound effects  
+- `baseball.py` → Probability-based baseball with animations  
+- `Trivia.py` → Pulls questions from `trivia_questions.xlsx`  
+
+### 🗨️ Communication Phrases
+- Stored in `data/communication.xlsx`  
+- Customizable with new phrases for fast TTS playback  
+
+### ⚙️ System Controls
+- Emergency alert  
+- Volume up/down  
+- Sleep timer (set/cancel)  
+- Display off / lock / restart / shutdown  
+
+---
+
+## Flowchart
+
+```mermaid
+flowchart TD
+    A[shows.xlsx] -->|Marathon Mode| B[last_watched.json<br>(auto progress)]
+    A -->|Linked Show| C[EPISODE_SELECTION.xlsx<br>(seasons & episodes)]
+    C --> D[Direct episode navigation]
+    E[communication.xlsx] --> F[Quick Phrases in Keyboard]
+````
+
+---
 
 ## Installation
 
@@ -72,56 +95,70 @@ This project enhances accessibility for individuals with physical challenges, su
 # Clone this repository
 git clone https://github.com/acroz3n/ben-s-software.git
 
-# Navigate to the project directory
-cd ben-accessibility-software
+# Navigate into the repo
+cd "Ben's Python Computer Software"
 
 # Install required dependencies
 pip install -r requirements.txt
 
-# Run the application
-comm-v10.py
+# Run the main software
+python comm-v10.py
 ```
 
-## Usage
-
-1. **Starting the Software**:
-   - Connect Ben's two-button device.
-   - Launch the application with `comm-v9.py`.
-2. **Navigating the Interface**:
-   - Use the `Scan` button to highlight options.
-   - Use the `Select` button to confirm.
-3. **Opening Shows**:
-   - Populate `shows.xlsx` and navigate to "Favorite Shows".
-   - Select a show to resume from the last saved URL.
-4. **Using Quick Phrases**:
-   - Access the keyboard’s layout menu.
-   - Select a phrase to display or speak with text-to-speech.
+---
 
 ## Configuration
 
-- **Shows List**: Update `shows.xlsx` to add new shows.
-- **Trivia Questions**: Update `trivia_questions.xlsx` for new trivia categories and questions.
-- **Word Jumble**: Update `wordjumble.xlsx` for new words in the jumble game (2-3-4-5-6-7-8 letter words, follow pattern of input).
+* **Shows** → Edit `data/shows.xlsx`
+* **Episodes** → Populate `data/EPISODE_SELECTION.xlsx` for detailed navigation
+* **Quick Phrases** → Edit `data/communication.xlsx`
+* **Trivia Questions** → Add to `data/trivia_questions.xlsx`
+* **Word Jumble** → Add words in `data/wordjumble.xlsx`
+
+⚠️ A **web scraper** (`scripts/`) was used to collect episodes but is **not included as part of the main repo**.
+
+---
 
 ## Dependencies
 
-- **Python 3.8+**
-- **PyAutoGUI**
-- **PyTTSx3** (Text-to-Speech)
-- **Flask** (Optional for Web Interface)
-- **Pygame** (For future game development)
-- **Pymunk** (For physics-based interactions in future games)
+* Python 3.8+
+* `pyautogui`
+* `keyboard`
+* `pyttsx3` (TTS)
+* `pygame`
+* `pymunk`
+* `flask` (optional, web interface)
+
+---
 
 ## Contributing
 
-Contributions are welcome! Please fork this repository and submit a pull request.
+This project still contains **duplicate functions** and quick patches.
+It’s meant to show what’s possible with AI-assisted code, not perfect engineering.
+
+Pull requests to improve stability, refactor code, or add features are welcome.
+
+---
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+
+---
 
 ## Acknowledgments
 
-Special thanks to Ben and his family for inspiring this project and providing valuable feedback.
+* **Ben** — inspiration and primary user
+* **Nancy & Ari** — caregiving and development
+* **OpenAI’s ChatGPT** — AI-assisted coding partner
+* **Predictive Keyboard (`keyboard.py`)** — developed by Ari Rosenberg
+* **Accessibility & open-source community** — proof that collaboration makes technology better
 
+---
 
+## Purpose
+
+This is more than just one program.
+It’s an **open-source example** of how AI + caregiving can create **accessible, personalized tools** for people with severe disabilities.
+
+We hope it inspires others to build and share similar projects.
