@@ -929,6 +929,10 @@ class ControlBar(tk.Tk):
         self.focus_force()
         self.lift()
 
+        # NEW: aggressively reclaim focus whenever we lose it and also kick a quick first focus
+        self.bind("<FocusOut>", lambda _e: self.after(1, self._force_foreground))
+        self.after(200, self._force_foreground)
+
     # ---------- Layout ----------
     def _place_bottom(self):
         sw = self.winfo_screenwidth()
@@ -1077,16 +1081,80 @@ class ControlBar(tk.Tk):
         self.lift()
         self.update_idletasks()
 
-    # NEW: aggressively reclaim focus for a short window after actions that may steal focus
-    def _refocus_for(self, seconds: float = 2.0):
-        end = time.time() + max(0.2, seconds)
-        def _tick():
-            if not self.winfo_exists():
+    # NEW: low-level helper to force foreground even if another thread owns it
+    def _set_foreground_win32(self, hwnd: int):
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+
+            GetWindowThreadProcessId = user32.GetWindowThreadProcessId
+            GetForegroundWindow = user32.GetForegroundWindow
+            AttachThreadInput = user32.AttachThreadInput
+            SetForegroundWindow = user32.SetForegroundWindow
+            SetFocus = user32.SetFocus
+            BringWindowToTop = user32.BringWindowToTop
+
+            fg = GetForegroundWindow()
+            if fg == hwnd:
                 return
-            self._refocus_bar()
-            if time.time() < end:
-                self.after(120, _tick)
-        _tick()
+
+            # Get threads
+            pid = wintypes.DWORD()
+            fg_thread = GetWindowThreadProcessId(fg, ctypes.byref(pid))
+            cur_thread = kernel32.GetCurrentThreadId()
+
+            # Temporarily attach threads to bypass foreground lock
+            AttachThreadInput(cur_thread, fg_thread, True)
+            try:
+                try:
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                except Exception:
+                    pass
+                try:
+                    win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                                          win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+                except Exception:
+                    pass
+                SetForegroundWindow(hwnd)
+                BringWindowToTop(hwnd)
+                SetFocus(hwnd)
+            finally:
+                AttachThreadInput(cur_thread, fg_thread, False)
+        except Exception:
+            # Fall back to normal refocus
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+
+    # NEW: one-shot aggressive focus/foreground pump
+    def _force_foreground(self):
+        if not self.winfo_exists():
+            return
+        # Reassert topmost and global grab
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
+        try:
+            self.grab_set_global()
+        except Exception:
+            self.grab_set()
+        # Force to true foreground using Win32 attach trick
+        try:
+            hwnd = self.winfo_id()
+            self._set_foreground_win32(hwnd)
+        except Exception:
+            pass
+        # Make sure Tk believes it has focus
+        try:
+            self.focus_force()
+            self.lift()
+        except Exception:
+            pass
+        self.update_idletasks()
 
     # ---------- Key handling ----------
     # NEW: Space pressed → maybe start auto-scan after delay
@@ -1168,11 +1236,17 @@ class ControlBar(tk.Tk):
         if not self.winfo_exists():
             return
         try:
-            self.attributes("-topmost", True)
-            self.lift()
+            # Stronger than lift(): also force to the foreground so Space/Return work reliably
+            self._force_foreground()
         except Exception:
-            pass
-        self.after(1500, self._raise_forever)
+            # Soft fallback if anything fails
+            try:
+                self.attributes("-topmost", True)
+                self.lift()
+            except Exception:
+                pass
+        # Run more frequently so other apps can't keep the focus for long
+        self.after(400, self._raise_forever)
 
     # ---------------- actions ----------------
     def _init_linear_index(self) -> Optional[int]:
@@ -1602,11 +1676,21 @@ class ControlBar(tk.Tk):
         try:
             exe = _find_chrome_exe()
             if exe:
+                # Prepare hidden-window startup info for subprocess
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = win32con.SW_HIDE
                 try:
-                    subprocess.Popen([exe, "--new-window", "--start-fullscreen", url])
+                    subprocess.Popen(
+                        [exe, "--new-window", "--start-fullscreen", url],
+                        startupinfo=startupinfo
+                    )
                 except Exception:
                     # Fallback without --new-window
-                    subprocess.Popen([exe, url])
+                    subprocess.Popen(
+                        [exe, url],
+                        startupinfo=startupinfo
+                    )
                 launched = True
             else:
                 os.startfile(url)
