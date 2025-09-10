@@ -37,20 +37,46 @@ def launch_control_bar(mode="basic", show_title=None):
 STOP_EVENT = threading.Event()
 
 def monitor_app_focus(app_title="Accessible Menu"):
-    # Make loop stoppable and stop touching the window once it's gone
     while not STOP_EVENT.is_set():
         try:
             if not is_chrome_running():
+                # Dismiss Start/taskbar focus if it has it
+                try:
+                    send_esc_key()
+                except Exception:
+                    pass
+
                 hwnd = win32gui.FindWindow(None, app_title)
                 if not hwnd:
-                    break  # window no longer exists; stop this loop
+                    break  # window gone
+
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
+
+                # Temporarily attach to the foreground thread so SetForegroundWindow is honored
+                fg = user32.GetForegroundWindow()
+                fg_tid = user32.GetWindowThreadProcessId(fg, None)
+                cur_tid = kernel32.GetCurrentThreadId()
+                user32.AttachThreadInput(cur_tid, fg_tid, True)
+
+                # Restore and force-raise above the taskbar
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+                win32gui.SetWindowPos(
+                    hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                )
                 win32gui.SetForegroundWindow(hwnd)
-            # else: do NOTHING
+                win32gui.SetActiveWindow(hwnd)
+                win32gui.SetFocus(hwnd)
+                win32gui.SetWindowPos(
+                    hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+                )
+
+                user32.AttachThreadInput(cur_tid, fg_tid, False)
         except Exception as e:
             print(f"Error in monitor_app_focus: {e}")
-        time.sleep(2)
+        time.sleep(1.0)
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -74,8 +100,13 @@ def monitor_and_minimize(app):
                 if app.state() == "normal" or "Accessible Menu" in active_window:
                     app.iconify()
             else:
+                # CHANGED: if Chrome is NOT running, never allow minimized state
                 if app.state() == "iconic":
-                    pass  # don't automatically restore unless you want to
+                    app.deiconify()
+                    try:
+                        app._force_foreground_once()
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"monitor_and_minimize error: {e}")
         time.sleep(1)
@@ -109,7 +140,6 @@ def send_esc_key():
     """Send the ESC key to close the Start Menu."""
     ctypes.windll.user32.keybd_event(0x1B, 0, 0, 0)  # ESC key down
     ctypes.windll.user32.keybd_event(0x1B, 0, 2, 0)  # ESC key up
-    print("ESC key sent to close Start Menu.")
 
 def is_start_menu_open():
     """Check if the Start Menu is currently open and focused."""
@@ -121,14 +151,9 @@ def monitor_start_menu():
     """Continuously check and close the Start Menu if it is open."""
     while not STOP_EVENT.is_set():
         try:
-            # Check if the Start Menu is active
             if is_start_menu_open():
                 print("Start Menu detected. Closing it now.")
                 send_esc_key()
-            else:
-                hwnd = win32gui.GetForegroundWindow()
-                active_window_title = win32gui.GetWindowText(hwnd)
-                print(f"Active window: {active_window_title} (Start Menu not active).")
         except Exception as e:
             print(f"Error in monitor_start_menu: {e}")
         
@@ -479,6 +504,9 @@ class App(tk.Tk):
         self.title("Accessible Menu")
         self.geometry("960x540")  # Default, will adjust to screen size
         self.attributes("-fullscreen", True)
+        # Nudge on launch so fullscreen sits above the taskbar
+        self.attributes("-topmost", True)
+        self.after(400, lambda: self.attributes("-topmost", False))
         self.configure(bg="black")
         self.current_frame = None
         self.buttons = []  # Holds buttons for scanning
@@ -512,12 +540,79 @@ class App(tk.Tk):
 
         self.menu_stack = []
 
+        # Ensure we steal focus on launch with a few quick retries
+        self.after(50, self._force_foreground_once)
+        self.after(250, self._force_foreground_once)
+        self.after(600, self._force_foreground_once)
+
         # Initialize the main menu
         print("Initializing the main menu...")
         self.show_frame(MainMenuPage)
 
         # Bind window close to graceful shutdown
         self.protocol("WM_DELETE_WINDOW", lambda: graceful_exit(self))
+
+        # ADD: prevent minimize when Chrome is not running
+        self.bind("<Unmap>", self._prevent_minimize_when_disallowed)
+        # ADD: poll Chrome state to toggle minimize availability and enforce visibility
+        self.after(500, self._poll_chrome_state)
+
+    def _force_foreground_once(self):
+        """Strong foreground attempt for the Tk window HWND (robust, no exceptions)."""
+        try:
+            try:
+                send_esc_key()
+            except Exception:
+                pass
+
+            self.update_idletasks()
+            hwnd = self.winfo_id()
+
+            # CHANGED: validate window handle before using it
+            if not hwnd or not win32gui.IsWindow(hwnd):
+                return
+
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+
+            # Allow foreground; harmless if it fails
+            try:
+                user32.AllowSetForegroundWindow(-1)
+            except Exception:
+                pass
+
+            # Attach thread input if there is a current foreground window
+            fg = user32.GetForegroundWindow()
+            cur_tid = kernel32.GetCurrentThreadId()
+            fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+            if fg and fg_tid:
+                user32.AttachThreadInput(cur_tid, fg_tid, True)
+
+            # Restore and raise
+            user32.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.SetWindowPos(
+                hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW
+            )
+
+            # CHANGED: use ctypes SetForegroundWindow (returns BOOL, no exception)
+            user32.SetForegroundWindow(hwnd)
+
+            # Drop topmost
+            win32gui.SetWindowPos(
+                hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+            )
+        except Exception as e:
+            # CHANGED: softer message; avoid pywin error tuples
+            print(f"[INIT-FOCUS] soft fail: {e}")
+        finally:
+            # Safely detach if we attached
+            try:
+                if 'fg' in locals() and fg and fg_tid:
+                    ctypes.windll.user32.AttachThreadInput(cur_tid, fg_tid, False)
+            except Exception:
+                pass
 
     def force_focus(self):
         self.focus_force()
@@ -531,11 +626,12 @@ class App(tk.Tk):
         control_frame = tk.Frame(self, bg="gray")  # Change background color to make it visible
         control_frame.pack(side="top", fill="x")
 
-        minimize_button = tk.Button(
+        # CHANGED: route minimize through a guard method and keep a handle for enabling/disabling
+        self.minimize_button = tk.Button(
             control_frame, text="Minimize", bg="light blue", fg="black",
-            command=self.iconify, font=("Arial", 12)
+            command=self.request_minimize, font=("Arial", 12)
         )
-        minimize_button.pack(side="right", padx=5, pady=5)
+        self.minimize_button.pack(side="right", padx=5, pady=5)
 
         close_button = tk.Button(
             control_frame, text="Close", bg="red", fg="white",
@@ -543,6 +639,47 @@ class App(tk.Tk):
             command=lambda: graceful_exit(self), font=("Arial", 12)
         )
         close_button.pack(side="right", padx=5, pady=5)
+
+    # ADD: guarded minimize request — only allow when Chrome is running
+    def request_minimize(self):
+        if is_chrome_running():
+            self.iconify()
+        else:
+            # bounce back immediately and keep focus
+            self.deiconify()
+            try:
+                self._force_foreground_once()
+            except Exception:
+                pass
+            try:
+                speak("Cannot minimize now")
+            except Exception:
+                pass
+
+    # ADD: auto-restore if minimized and Chrome is not running; also toggle Minimize button state
+    def _poll_chrome_state(self):
+        try:
+            chrome = is_chrome_running()
+            if hasattr(self, "minimize_button"):
+                self.minimize_button.config(state=("normal" if chrome else "disabled"))
+            if not chrome and self.state() == "iconic":
+                self.deiconify()
+                try:
+                    self._force_foreground_once()
+                except Exception:
+                    pass
+        finally:
+            if not STOP_EVENT.is_set():
+                self.after(700, self._poll_chrome_state)
+
+    # ADD: block minimize events when disallowed (covers taskbar/system attempts)
+    def _prevent_minimize_when_disallowed(self, event):
+        try:
+            if not is_chrome_running():
+                # Re-show and refocus shortly after the Unmap event
+                self.after(10, lambda: (self.deiconify(), self._force_foreground_once()))
+        except Exception as e:
+            print(f"[UNMAP-GUARD] {e}")
 
     def bind_keys_for_scanning(self):
         # Unbind any previous key events (if needed).
@@ -577,7 +714,7 @@ class App(tk.Tk):
         if is_chrome_running():
             return  # Disable spacebar when Chrome is open
         if self.spacebar_pressed:
-            self.spacebar_pressed = False
+            self.spacebar_pressed = False                                                                                      
             if not self.long_spacebar_pressed:
                 self.scan_forward()
             else:
@@ -596,6 +733,8 @@ class App(tk.Tk):
         self.current_button_index = 0
         if self.buttons:
             self.highlight_button(0)
+        # Ensure the app keeps focus for key events
+        self.focus_set()
 
     def show_previous_menu(self):
         if self.menu_stack:
@@ -604,10 +743,14 @@ class App(tk.Tk):
             self.current_frame = previous_factory(self)
             self.current_frame.pack(expand=True, fill="both")
             self.current_frame_factory = previous_factory
-            self.buttons = self.current_frame.buttonsnippn
+            # FIX: correct attribute, guard if missing
+            self.buttons = getattr(self.current_frame, "buttons", [])
             self.current_button_index = 0
+            self.selection_enabled = True
             if self.buttons:
                 self.highlight_button(0)
+            # Keep focus so scan/select keys work
+            self.focus_set()
         else:
             self.show_frame(MainMenuPage)
 
@@ -1405,6 +1548,8 @@ class EntertainmentMenuPage(MenuFrame):
             ("Audio", lambda: self.parent.show_frame(lambda p: LibraryMenu(p, self._get_audio_data(), "genre", parent_key="audio")), "Audio"),
             ("Live Streams", lambda: self.parent.show_frame(lambda p: LibraryMenu(p, self.parent.organized_links.get("live", {}), "genre", parent_key="live")), "Live Streams"),
             ("Games", lambda: parent.show_frame(GamesPage), "Games"),
+            # ADD: Web Search button
+            ("Web Search", self.open_web_search, "Web Search"),
         ]
 
         self.create_button_grid(buttons, columns=2)
@@ -1445,6 +1590,26 @@ class EntertainmentMenuPage(MenuFrame):
         if speak_text:
             speak(speak_text)
 
+    def open_web_search(self):
+        try:
+            script_path = os.path.join(os.path.dirname(__file__), "search", "narbe_scan_browser.py")
+            if not os.path.exists(script_path):
+                print(f"[WebSearch] Not found: {script_path}")
+                speak("Web search app not found")
+                return
+
+            subprocess.Popen([sys.executable, script_path],
+                             cwd=os.path.dirname(script_path),
+                             shell=False)
+            print(f"[WebSearch] Launched: {script_path}")
+        except Exception as e:
+            print(f"[WebSearch] Failed to launch: {e}")
+            speak("Unable to open web search")
+            return
+
+        # Close this app after launching the web search
+        graceful_exit(self.parent)
+
     def coming_soon(self):
         """Notify that this feature is coming soon."""
         speak("This feature is coming soon")
@@ -1452,7 +1617,7 @@ class EntertainmentMenuPage(MenuFrame):
 from functools import partial
 
 class GamesPage(MenuFrame):
-    """Games menu that auto‑populates from Python scripts inside ./games."""
+    """Games menu that auto‑populates from Python scripts and HTML files inside ./games."""
 
     GAMES_DIR = os.path.join(os.path.dirname(__file__), "games")
 
@@ -1470,7 +1635,7 @@ class GamesPage(MenuFrame):
 
     # ───────────────────────── helpers ──────────────────────────
     def _discover_games(self):
-        """Return a list of (label, command, speak_text) tuples for each game script."""
+        """Return a list of (label, command, speak_text) tuples for each game file (.py, .html)."""
         games = []
 
         if not os.path.isdir(self.GAMES_DIR):
@@ -1478,8 +1643,11 @@ class GamesPage(MenuFrame):
             return games
 
         for file in sorted(os.listdir(self.GAMES_DIR)):
-            # Only include Python scripts; skip dunders and non‑py files
-            if not file.endswith(".py") or file.startswith("__"):
+            # Include Python and HTML files; skip dunders and others
+            if file.startswith("__"):
+                continue
+            ext = os.path.splitext(file)[1].lower()
+            if ext not in (".py", ".html", ".htm"):
                 continue
 
             script_path = os.path.join(self.GAMES_DIR, file)
@@ -1526,9 +1694,26 @@ class GamesPage(MenuFrame):
     # ───────────────────────── actions ──────────────────────────
     def open_game(self, script_path, title):
         try:
-            print(f"[GamesPage] Launching: {title} → {script_path}")
-            subprocess.Popen([sys.executable, script_path], cwd=os.path.dirname(script_path))
-            self.parent.destroy()  # Close main app so game runs fullscreen
+            ext = os.path.splitext(script_path)[1].lower()
+            if ext == ".py":
+                print(f"[GamesPage] Launching Python game: {title} → {script_path}")
+                subprocess.Popen([sys.executable, script_path], cwd=os.path.dirname(script_path))
+                # Close main app only for Python games
+                self.parent.destroy()
+            elif ext in (".html", ".htm"):
+                print(f"[GamesPage] Launching HTML game: {title} → {script_path}")
+                from pathlib import Path
+                chrome_exe = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+                file_url = Path(script_path).resolve().as_uri()
+                if os.path.exists(chrome_exe):
+                    subprocess.Popen([chrome_exe, "--start-fullscreen", file_url],
+                                     cwd=os.path.dirname(script_path), shell=False)
+                else:
+                    # Fallback to default browser
+                    os.startfile(script_path)
+                # Do NOT close the app for HTML games; Chrome will trigger auto‑minimize
+            else:
+                raise ValueError(f"Unsupported game type: {ext}")
         except Exception as e:
             print(f"[GamesPage] Failed to open {title}: {e}")
             speak("Unable to launch the selected game.")
