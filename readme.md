@@ -20,7 +20,8 @@ It gives Ben the ability to:
 - Watch and navigate his favorite shows and movies  
 - Play simple games  
 - Access trivia and word challenges  
-- Control his computer with system and emergency functions  
+- Control his computer with system and emergency functions
+- Search Images and Videos on YouTube via his new Search Web app as of Sept 2025  
 
 The project is shared openly to inspire others to build similar accessibility tools.  
 
@@ -68,7 +69,12 @@ The project is shared openly to inspire others to build similar accessibility to
 - `TowerDefense.py` → Simple tower defense  
 - `MiniGolf.py` → Mini golf with sound effects  
 - `baseball.py` → Probability-based baseball with animations  
-- `Trivia.py` → Pulls questions from `trivia_questions.xlsx`  
+- `Trivia.py` → Pulls questions from `trivia_questions.xlsx`
+- 'Bennysays.html' → Game like "simon" with easy, medium, hard modes.
+
+### Search Function (`search/`)
+
+- 'narbe_scan_browser.py' allows the user to use scan/select to type and say phrases with kenlm predictive text and search. Search brings up a slide-show style browser of images/videos.
 
 ### Communication Phrases
 
@@ -157,3 +163,4 @@ This is more than just one program.
 It’s an **open-source example** of how AI + caregiving can create **accessible, personalized tools** for people with severe disabilities.
 
 We hope it inspires others to build and share similar projects.
+
