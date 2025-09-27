@@ -6,4 +6,5 @@ requests
 pywin32
 pandas
 pygame
+discord
 pymunk
