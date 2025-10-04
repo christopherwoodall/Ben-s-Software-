@@ -69,6 +69,7 @@ The project is shared openly to inspire others to build similar accessibility to
 - `baseball.py` → Probability-based baseball with animations  
 - `Trivia.py` → Pulls questions from `trivia_questions.xlsx`
 - 'Bennysays.html' → Game like "simon" with easy, medium, hard modes.
+- 'BENNYSPEGGLE.html' - Game like "Peggle" with 3 difficulty levels and the ability to make custom games.
 
 ### Search Function (`search/`)
 
@@ -92,7 +93,7 @@ The project is shared openly to inspire others to build similar accessibility to
 
 ```bash
 # Clone this repository
-git clone https://github.com/acroz3n/ben-s-software.git
+git clone https://github.com/NARBEHOUSE/ben-s-software.git
 
 # Navigate into the repo
 cd "Ben's Python Computer Software"
@@ -161,5 +162,6 @@ This is more than just one program.
 It’s an **open-source example** of how AI + caregiving can create **accessible, personalized tools** for people with severe disabilities.
 
 We hope it inspires others to build and share similar projects.
+
 
 
