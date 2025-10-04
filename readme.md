@@ -1,5 +1,3 @@
-
-````markdown
 # Ben's Accessibility Software
 
 > ⚠️ **Disclaimer**  
@@ -163,4 +161,5 @@ This is more than just one program.
 It’s an **open-source example** of how AI + caregiving can create **accessible, personalized tools** for people with severe disabilities.
 
 We hope it inspires others to build and share similar projects.
+
 
