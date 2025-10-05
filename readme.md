@@ -69,8 +69,8 @@ The project is shared openly to inspire others to build similar accessibility to
 - `baseball.py` → Probability-based baseball with animations  
 - `Trivia.py` → Pulls questions from `trivia_questions.xlsx`
 - 'Bennysays.html' → Game like "simon" with easy, medium, hard modes.
-- 'BENNYSPEGGLE.html' - Game like "Peggle" with 3 difficulty levels and the ability to make custom games.
-
+- 'BENNYSPEGGLE.html' → Game like "Peggle" with 3 difficulty levels and the ability to make custom games.
+  
 ### Search Function (`search/`)
 
 - 'narbe_scan_browser.py' allows the user to use scan/select to type and say phrases with kenlm predictive text and search. Search brings up a slide-show style browser of images/videos.
@@ -170,6 +170,7 @@ This is more than just one program.
 It’s an **open-source example** of how AI + caregiving can create **accessible, personalized tools** for people with severe disabilities.
 
 We hope it inspires others to build and share similar projects.
+
 
 
 
