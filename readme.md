@@ -9,7 +9,7 @@
 
 ## Overview
 
-This project was developed for **Ben**, who lives with **TUBB4A-related Leukodystrophy (H-ABC)** and uses only two switches (head left/right) to interact with his computer.  
+This project was developed for **Ben**, who lives with **TUBB4A-related Leukodystrophy (H-ABC)** and uses only two switches (head left/right) mapped to Spacebar and Return to interact with his computer.  
 
 It gives Ben the ability to:
 
@@ -162,6 +162,7 @@ This is more than just one program.
 It’s an **open-source example** of how AI + caregiving can create **accessible, personalized tools** for people with severe disabilities.
 
 We hope it inspires others to build and share similar projects.
+
 
 
 
