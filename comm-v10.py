@@ -245,6 +245,38 @@ import os
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 LAST_WATCHED_FILE = os.path.join(DATA_DIR, "last_watched.json")
 
+# ADD: whitelist of allowed streaming domains
+ALLOWED_DOMAINS = {
+    "netflix": ["netflix.com"],
+    "disney+": ["disneyplus.com"],
+    "paramount+": ["paramountplus.com"],
+    "prime video": ["primevideo.com", "amazon.com"],
+    "hulu": ["hulu.com"],
+    "max": ["max.com", "hbomax.com"],
+    "pluto": ["pluto.tv"],
+    "youtube": ["youtube.com", "youtu.be"],
+}
+
+def _is_allowed_for_show(show, url):
+    """Reject file URLs, Plex/localhost, and allow only known streaming domains."""
+    if not show or not url:
+        return False
+    try:
+        u = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    if (u.scheme or "").lower() == "file":
+        return False
+    host = (u.netloc or "").lower()
+    if not host:
+        return False
+    # never persist any Plex or local endpoints
+    if "plex.tv" in host or "plex.direct" in host or host.startswith("127.0.0.1") or host.startswith("localhost"):
+        return False
+    # allow only known streaming domains
+    flat = [h for vals in ALLOWED_DOMAINS.values() for h in vals]
+    return any(h in host for h in flat)
+
 # Function to load the last_watched.json data
 def load_last_watched():
     if os.path.exists(LAST_WATCHED_FILE):
@@ -270,6 +302,13 @@ class URLSaveHandler(BaseHTTPRequestHandler):
 
         # Get the active show
         show = MenuFrame.active_show
+
+        # Reject unwanted or unsupported URLs
+        if not _is_allowed_for_show(show, url):
+            print(f"[URL-SAVED] Rejected for '{show}': {url}")
+            self.send_response(204)
+            self.end_headers()
+            return
 
         if show and url:
             # Read the existing data from last_watched.json
@@ -431,6 +470,10 @@ def get_last_position(show_title):
     return None, None, ""
 
 def set_last_position(show_title, season, episode, url):
+    # Do not save any Plex content into last_watched.json
+    if url and "plex.tv" in str(url).lower():
+        print(f"[SAVE] Skipping Plex last position for {show_title} S{int(season):02d}E{int(episode):02d}")
+        return
     data = load_last_watched()
     data[show_title] = {"season": int(season), "episode": int(episode), "url": url}
     save_last_watched(data)
@@ -506,7 +549,7 @@ class App(tk.Tk):
         self.attributes("-fullscreen", True)
         # Nudge on launch so fullscreen sits above the taskbar
         self.attributes("-topmost", True)
-        self.after(400, lambda: self.attributes("-topmost", False))
+        self.after(400, lambda: self.attributes("-topmost", True))
         self.configure(bg="black")
         self.current_frame = None
         self.buttons = []  # Holds buttons for scanning
@@ -1090,6 +1133,11 @@ class MenuFrame(tk.Frame):
         """
         Every 30 seconds, fetch the active URL and save it under `show_name` in last_watched.json.
         """
+        # Skip tracking/saving for Plex entirely
+        if expected_url and "plex.tv" in expected_url.lower():
+            print(f"[TRACKER] Skipping Plex tracking/saves for: {show_name}")
+            return
+
         base = "/".join(expected_url.split("/")[:4])
         print(f"[TRACKER] Started URL-tracker for: {show_name}")
 
@@ -1136,27 +1184,24 @@ class MenuFrame(tk.Frame):
         pyautogui.press('p')
         print("Sent keys: x, enter, then after 2 seconds, p.")
 
-    def open_plex(self, plex_url, show_name):
+    def open_plex(self, plex_url, show_name, persistent=True):
         """
-        Opens the Plex URL in Chrome and then sends keyboard commands:
-        1. Press 'x'
-        2. Press 'return'
-        3. Wait 2 seconds
-        4. Press 'p'
+        Open a Plex URL in Chrome, then send keyboard commands to start playback.
+        Set persistent=False to force opening the exact episode URL (no last_watched override).
         """
-        # Open Plex using your common method.
-        self.open_in_chrome(show_name, plex_url)
-        
+        # Open the URL in Chrome with desired persistence
+        self.open_in_chrome(show_name, plex_url, persistent=persistent)
+
         # Wait for the Plex page to load fully.
         time.sleep(7)  # Adjust as necessary for your system.
-        
-        # Send the keyboard commands.
+
+        # Send the keyboard commands (Plex start flow).
         pyautogui.press('x')
         time.sleep(2)
         pyautogui.press('enter')
         time.sleep(2)
         pyautogui.press('p')
-        print("Sent keys: x, enter, then after 2 seconds, p.")     
+        print("Sent keys: x, enter, then after 2 seconds, p.")
 
     def open_youtube(self, youtube_url, show_name):
 
@@ -1379,7 +1424,8 @@ class CommunicationPageMenu(MenuFrame):
         self.phrases_by_category = load_communication_phrases()
         self.categories = sorted(self.phrases_by_category.keys())
         self.page = 0
-        self.page_size = 14  # back + keyboard + up to 14 categories = 16 buttons max
+        # CHANGED: back + keyboard + messenger + up to 13 categories = 16 buttons max
+        self.page_size = 13
         self.load_buttons()
 
     def load_buttons(self):
@@ -1387,9 +1433,11 @@ class CommunicationPageMenu(MenuFrame):
         end = start + self.page_size
         current_cats = self.categories[start:end]
 
+        # CHANGED: add Messenger after Keyboard
         buttons = [
             ("Back", lambda: self.parent.show_frame(MainMenuPage), "Back"),
-            ("Keyboard", self.open_keyboard_app, "Keyboard")
+            ("Keyboard", self.open_keyboard_app, "Keyboard"),
+            ("Messenger", self.open_messenger_app, "Messenger"),
         ]
         for cat in current_cats:
             buttons.append((cat, lambda c=cat: self.parent.show_frame(lambda p: CommunicationCategoryMenu(p, c, self.phrases_by_category[c])), cat))
@@ -1411,6 +1459,19 @@ class CommunicationPageMenu(MenuFrame):
             self.master.destroy()
         except Exception as e:
             print(f"Failed to open keyboard: {e}") 
+
+    # ADD: open Messenger (Discord) app
+    def open_messenger_app(self):
+        try:
+            script_path = os.path.join(os.path.dirname(__file__), "messenger", "ben_discord_app.py")
+            if not os.path.exists(script_path):
+                print(f"[Messenger] Not found: {script_path}")
+                speak("Messenger app not found")
+                return
+            subprocess.Popen([sys.executable, script_path])
+            self.master.destroy()
+        except Exception as e:
+            print(f"Failed to open messenger: {e}")
 
 class CommunicationCategoryMenu(MenuFrame):
     def __init__(self, parent, category_name, phrase_list):
@@ -1936,7 +1997,8 @@ class SeasonPickerMenu(MenuFrame):
 
     def _reload(self):
         self.parent.selection_enabled = False  # debounce during rebuild
-        seasons = get_show_seasons(self.show_title)
+        # CHANGED: hide Season 0 (special "Continue" row)
+        seasons = [s for s in get_show_seasons(self.show_title) if s != 0]
         seasons_per_page, base_offset = self._page_sizing()
         subset = seasons[base_offset: base_offset + seasons_per_page]
         has_next = (base_offset + seasons_per_page) < len(seasons)
@@ -1965,27 +2027,73 @@ class SeasonPickerMenu(MenuFrame):
         self._reload()
 
     def _do_continue(self):
-        # Use last_watched.json; if a URL exists, open it immediately.
+        # Try last_watched.json first
         s, e, url = get_last_position(self.show_title)
         if url:
-            self.open_in_chrome(self.show_title, url, persistent=False)
-            # ADD: overlay in episodes mode
+            low = url.lower()
+            if "plex.tv" in low:
+                self.open_plex(url, self.show_title, persistent=False)
+            elif "youtube.com" in low or "youtu.be" in low:
+                self.open_youtube(url, self.show_title)
+            elif "pluto.tv" in low:
+                self.open_pluto(self.show_title, url)
+            elif "amazon.com" in low:
+                self.open_and_click(self.show_title, url)
+            else:
+                self.open_in_chrome(self.show_title, url, persistent=False)
             launch_control_bar("episodes", self.show_title)
             return
 
-        # If we only have season/episode numbers, try to resolve URL from cache.
-        if s is not None and e is not None:
-            eps = get_season_episodes(self.show_title, int(s))
-            target = next((ep for ep in eps if ep["Episode Number"] == int(e)), None)
-            if target and target.get("Episode URL"):
-                set_last_position(self.show_title, target["Season Number"], target["Episode Number"], target["Episode URL"])
-                self.open_in_chrome(self.show_title, target["Episode URL"], persistent=False)
-                # ADD: overlay in episodes mode
+        # If only season/episode numbers are stored, resolve URL from catalog
+        try:
+            if s is not None and e is not None:
+                if not EPISODE_CACHE:
+                    load_episode_catalog()
+                eps = get_season_episodes(self.show_title, int(s))
+                target = next((ep for ep in eps if int(ep["Episode Number"]) == int(e)), None)
+                if target and target.get("Episode URL"):
+                    ep_url = target["Episode URL"]
+                    set_last_position(self.show_title, int(target["Season Number"]), int(target["Episode Number"]), ep_url)
+
+                    low = ep_url.lower()
+                    if "plex.tv" in low:
+                        self.open_plex(ep_url, self.show_title, persistent=False)
+                    elif "youtube.com" in low or "youtu.be" in low:
+                        self.open_youtube(ep_url, self.show_title)
+                    elif "pluto.tv" in low:
+                        self.open_pluto(self.show_title, ep_url)
+                    elif "amazon.com" in low or "primevideo.com" in low:
+                        self.open_and_click(self.show_title, ep_url)
+                    else:
+                        self.open_in_chrome(self.show_title, ep_url, persistent=False)
+
+                    launch_control_bar("episodes", self.show_title)
+                    return
+        except Exception as ex:
+            print(f"[CONTINUE] failed to resolve cached episode: {ex}")
+
+        # NEW: fall back to Season 0, Episode 0 “Continue” from EPISODE_SELECTION.xlsx (Plex series page)
+        try:
+            if not EPISODE_CACHE:
+                load_episode_catalog()
+            eps0 = EPISODE_CACHE.get(self.show_title.lower(), {}).get(0, [])
+            cont = next((ep for ep in eps0 if int(ep.get("Episode Number", -1)) == 0), None)
+            if cont and cont.get("Episode URL"):
+                ep_url = cont["Episode URL"]
+                low = ep_url.lower()
+                if "plex.tv" in low:
+                    self.open_plex(ep_url, self.show_title, persistent=False)
+                else:
+                    self.open_in_chrome(self.show_title, ep_url, persistent=False)
                 launch_control_bar("episodes", self.show_title)
                 return
-            # ...existing fallback...
+        except Exception as ex:
+            print(f"[CONTINUE] fallback via season 0 failed: {ex}")
 
-        # ...existing code...
+        # Fallback to episode list UI
+        seasons = get_show_seasons(self.show_title) or []
+        start_season = int(s) if s is not None else (seasons[0] if seasons else 1)
+        self.parent.show_frame(lambda p: EpisodeListMenu(p, self.show_title, season_number=start_season, start_from_episode=e))
 
     def _back_to_root(self):
         """Always go back to the root Shows page (from shows.xlsx)."""
@@ -2050,9 +2158,22 @@ class EpisodeListMenu(MenuFrame):
         if not url:
             speak("No URL for this episode.")
             return
+
         set_last_position(self.show_title, ep["Season Number"], ep["Episode Number"], url)
-        self.open_in_chrome(self.show_title, url, persistent=False)
-        # ADD: overlay in episodes mode when an episode starts
+
+        low = url.lower()
+        if "plex.tv" in low:
+            # Force the exact episode URL; then send x, enter, p
+            self.open_plex(url, self.show_title, persistent=False)
+        elif "youtube.com" in low or "youtu.be" in low:
+            self.open_youtube(url, self.show_title)
+        elif "pluto.tv" in low:
+            self.open_pluto(self.show_title, url)
+        elif "amazon.com" in low or "primevideo.com" in low:
+            self.open_and_click(self.show_title, url)
+        else:
+            self.open_in_chrome(self.show_title, url, persistent=False)
+
         launch_control_bar("episodes", self.show_title)
 
 # Run the App
