@@ -1,0 +1,6 @@
+{
+  "DISCORD_TOKEN": "your bot token",
+  "GUILD_ID": "your server id",
+  "CHANNEL_ID": "your channel id",
+  "DM_BRIDGE_CHANNEL_ID": "your bridge channel id"
+}
