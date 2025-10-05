@@ -78,7 +78,15 @@ The project is shared openly to inspire others to build similar accessibility to
 ### Communication Phrases
 
 - Stored in `data/communication.xlsx`  
-- Customizable with new phrases for fast TTS playback  
+- Customizable with new phrases for fast TTS playback
+
+### Messenger App
+
+- Messenger App is tied to a private discord server which you will have to configure.
+- The DMs come from a Bot configured for the private server (it needs to be added to the server with the correct permissions)
+- When the Bot gets a DM, the `messenger/simple_dm_listener.py` will read the message and send via TTS to the system.
+- When accessing `messenger/ben_discord_app.py` you will be able to see new messages highlighted GREEN and respond using the built-in keyboard app (`messenger/narbe_keyboard_send.py`)
+- As currently configured, the app will store 25 private channel messages and 10 DM messages per user (this can be expanded but is less for Ben's convenience)
 
 ### System Controls
 
@@ -162,6 +170,7 @@ This is more than just one program.
 It’s an **open-source example** of how AI + caregiving can create **accessible, personalized tools** for people with severe disabilities.
 
 We hope it inspires others to build and share similar projects.
+
 
 
 
