@@ -1,5 +1,4 @@
 pyttsx3
-openpyxl
 pyautogui
 pynput
 psutil
@@ -7,5 +6,7 @@ requests
 pywin32
 pandas
 pygame
-discord
 pymunk
+pyside6
+discord
+openpyxl
